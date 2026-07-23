@@ -366,12 +366,19 @@
     transition: width 180ms ease;
   }
   
+  .compact-panel {
+    padding: 18px 20px;
+  }
+  
   .people-list {
-    margin-top: 24px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 0;
   }
   
   .people-list-wide {
-    margin-top: 0;
+    min-height: auto;
   }
   
   .person-chip {
@@ -421,6 +428,65 @@
   .person-remove:disabled {
     opacity: 0.35;
     cursor: not-allowed;
+  }
+  
+  .section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0;
+  }
+  
+  .chat-log {
+    display: grid;
+    gap: 10px;
+    max-height: 220px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    margin-top: 8px;
+    padding-right: 4px;
+    overscroll-behavior: contain;
+  }
+  
+  .chat-empty {
+    color: var(--muted);
+    font-size: 0.95rem;
+    padding: 4px 0 8px;
+  }
+  
+  .chat-item {
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+    padding: 10px 12px;
+    border-radius: 14px;
+    background: var(--surface-2);
+    color: var(--text);
+  }
+  
+  .chat-item.chat-system {
+    background: rgba(15, 108, 112, 0.08);
+  }
+  
+  .chat-name {
+    font-weight: 700;
+    white-space: nowrap;
+  }
+  
+  .chat-body {
+    color: var(--muted);
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  
+  .chat-form {
+    display: flex;
+    gap: 10px;
+    margin-top: 12px;
+  }
+  
+  .chat-form .input {
+    flex: 1;
   }
   
   .results-top {
@@ -627,6 +693,38 @@
     background: rgba(255, 253, 250, 0.5);
   }
   
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(32, 26, 23, 0.35);
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    z-index: 1000;
+  }
+  
+  .modal-card {
+    width: min(460px, 100%);
+    background: rgba(255, 252, 247, 0.98);
+    border: 1px solid var(--border);
+    border-radius: 22px;
+    padding: 24px;
+    box-shadow: 0 20px 60px rgba(32, 26, 23, 0.18);
+  }
+  
+  .modal-note {
+    margin: 14px 0 0;
+    color: var(--muted);
+    font-size: 0.95rem;
+    line-height: 1.55;
+  }
+  
+  .modal-actions {
+    display: flex;
+    gap: 12px;
+    margin-top: 20px;
+  }
+  
   @media (max-width: 960px) {
     .you-points-grid {
       grid-template-columns: 1fr;
@@ -659,6 +757,14 @@
       width: 100%;
     }
   
+    .chat-form {
+      flex-direction: column;
+    }
+  
+    .chat-form .btn {
+      width: 100%;
+    }
+  
     .room-id-wrap {
       justify-content: flex-start;
     }
@@ -678,5 +784,9 @@
   
     .person-chip-text {
       max-width: 120px;
+    }
+  
+    .modal-actions {
+      flex-direction: column;
     }
   }

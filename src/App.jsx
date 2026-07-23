@@ -144,7 +144,9 @@ function RoomPage() {
   const [suggestions, setSuggestions] = useState([])
   const [votes, setVotes] = useState([])
   const [draftVotes, setDraftVotes] = useState({})
+  const [messages, setMessages] = useState([])
   const [suggestionInput, setSuggestionInput] = useState('')
+  const [chatInput, setChatInput] = useState('')
   const [loading, setLoading] = useState(true)
   const [savingName, setSavingName] = useState(false)
   const [addingSuggestion, setAddingSuggestion] = useState(false)
@@ -152,19 +154,28 @@ function RoomPage() {
   const [savingVotes, setSavingVotes] = useState(false)
   const [copyMessage, setCopyMessage] = useState('')
   const [error, setError] = useState('')
-  const [isRemoved, setIsRemoved] = useState(false)
+  const [removedModalOpen, setRemovedModalOpen] = useState(false)
+  const [removedModalMessage, setRemovedModalMessage] = useState(
+    'You have been removed from this session.'
+  )
+  const [chatPinnedToBottom, setChatPinnedToBottom] = useState(true)
 
   const saveTimeoutRef = useRef(null)
   const latestDraftRef = useRef({})
   const skipHydrateRef = useRef(false)
   const copyTimerRef = useRef(null)
   const redirectTimerRef = useRef(null)
+  const removeAlertNonceRef = useRef(0)
+  const chatLogRef = useRef(null)
+  const chatBottomRef = useRef(null)
+  const removedRef = useRef(false)
 
   async function refreshRoomData(roomId) {
     const [
       { data: participantRows, error: participantsError },
       { data: suggestionRows, error: suggestionsError },
       { data: voteRows, error: votesError },
+      { data: messageRows, error: messagesError },
     ] = await Promise.all([
       supabase
         .from('participants')
@@ -180,21 +191,38 @@ function RoomPage() {
         .from('votes')
         .select('*')
         .eq('room_id', roomId),
+      supabase
+        .from('messages')
+        .select('*')
+        .eq('room_id', roomId)
+        .order('created_at', { ascending: true })
+        .limit(80),
     ])
 
     if (participantsError) throw participantsError
     if (suggestionsError) throw suggestionsError
     if (votesError) throw votesError
+    if (messagesError) throw messagesError
 
     setParticipants(participantRows ?? [])
     setSuggestions(suggestionRows ?? [])
     setVotes(voteRows ?? [])
+    setMessages(messageRows ?? [])
+  }
+
+  function handleReturnHome() {
+    if (redirectTimerRef.current) clearTimeout(redirectTimerRef.current)
+    navigate('/', { replace: true })
   }
 
   function handleRemovedFromSession() {
-    if (isRemoved) return
+    const nonce = Date.now()
+    removeAlertNonceRef.current = nonce
+    removedRef.current = true
 
-    setIsRemoved(true)
+    setRemovedModalMessage('You have been removed from this session.')
+    setRemovedModalOpen(true)
+
     localStorage.removeItem(getParticipantStorageKey(upperCode))
     setParticipantId('')
     setDisplayName('')
@@ -204,14 +232,29 @@ function RoomPage() {
     setVotes([])
     setSuggestions([])
     setParticipants([])
-
-    window.alert('You have been removed from this session.')
+    setSavingVotes(false)
+    setLoading(false)
 
     if (redirectTimerRef.current) clearTimeout(redirectTimerRef.current)
     redirectTimerRef.current = setTimeout(() => {
+      if (removeAlertNonceRef.current !== nonce) return
       navigate('/', { replace: true })
-    }, 50)
+    }, 8000)
   }
+
+  function handleChatScroll() {
+    const el = chatLogRef.current
+    if (!el) return
+
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+    setChatPinnedToBottom(distanceFromBottom < 40)
+  }
+
+  useEffect(() => {
+    const el = chatLogRef.current
+    if (!el || !chatPinnedToBottom) return
+    el.scrollTop = el.scrollHeight
+  }, [messages, chatPinnedToBottom])
 
   useEffect(() => {
     let active = true
@@ -227,7 +270,7 @@ function RoomPage() {
           .eq('code', upperCode)
           .maybeSingle()
 
-        if (!active) return
+        if (!active || removedRef.current) return
 
         if (roomError) {
           setError(roomError.message)
@@ -255,7 +298,7 @@ function RoomPage() {
             .eq('room_id', roomData.id)
             .maybeSingle()
 
-          if (!active) return
+          if (!active || removedRef.current) return
 
           if (existingParticipant) {
             setParticipantId(existingParticipant.id)
@@ -267,7 +310,7 @@ function RoomPage() {
           }
         }
 
-        if (!localParticipantId && !isRemoved) {
+        if (!localParticipantId && !removedRef.current) {
           const defaultName = `Hungry Friend ${Math.floor(Math.random() * 900 + 100)}`
 
           const { data: newParticipant, error: participantError } = await supabase
@@ -279,7 +322,7 @@ function RoomPage() {
             .select()
             .single()
 
-          if (!active) return
+          if (!active || removedRef.current) return
 
           if (participantError) {
             setError(participantError.message)
@@ -294,13 +337,24 @@ function RoomPage() {
           setParticipantId(newParticipant.id)
           setDisplayName(newParticipant.display_name)
           setNameInput(newParticipant.display_name)
+
+          await supabase.from('messages').insert({
+            room_id: roomData.id,
+            participant_id: newParticipant.id,
+            type: 'system',
+            body: '',
+            meta: {
+              kind: 'join',
+              name: newParticipant.display_name,
+            },
+          })
         }
 
         await refreshRoomData(roomData.id)
 
-        if (active) setLoading(false)
+        if (active && !removedRef.current) setLoading(false)
       } catch (err) {
-        if (!active) return
+        if (!active || removedRef.current) return
         setError(err.message || 'Something went wrong.')
         setLoading(false)
       }
@@ -311,10 +365,10 @@ function RoomPage() {
     return () => {
       active = false
     }
-  }, [upperCode, isRemoved])
+  }, [upperCode])
 
   useEffect(() => {
-    if (!room?.id) return
+    if (!room?.id || removedRef.current) return
 
     const channel = supabase
       .channel(`room-${room.id}`)
@@ -328,6 +382,8 @@ function RoomPage() {
         },
         async (payload) => {
           try {
+            if (removedRef.current) return
+
             if (payload.eventType === 'DELETE') {
               const deletedId = payload.old?.id
               if (!deletedId) return
@@ -337,13 +393,19 @@ function RoomPage() {
 
               if (deletedId === participantId) {
                 handleRemovedFromSession()
-                return
               }
-
               return
             }
 
-            await refreshRoomData(room.id)
+            const changed = payload.new
+            if (!changed) return
+
+            setParticipants((prev) => {
+              const others = prev.filter((item) => item.id !== changed.id)
+              const next = [...others, changed]
+              next.sort((a, b) => a.created_at.localeCompare(b.created_at))
+              return next
+            })
           } catch {}
         }
       )
@@ -357,17 +419,32 @@ function RoomPage() {
         },
         async (payload) => {
           try {
+            if (removedRef.current) return
+
             const kickedParticipantId = payload.new?.participant_id
             if (!kickedParticipantId) return
 
             if (kickedParticipantId === participantId) {
               handleRemovedFromSession()
-
-              await supabase
-                .from('kicks')
-                .delete()
-                .eq('id', payload.new.id)
+              await supabase.from('kicks').delete().eq('id', payload.new.id)
             }
+          } catch {}
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+          filter: `room_id=eq.${room.id}`,
+        },
+        async (payload) => {
+          try {
+            if (removedRef.current) return
+            const next = payload.new
+            if (!next) return
+            setMessages((prev) => [...prev, next].slice(-80))
           } catch {}
         }
       )
@@ -379,23 +456,18 @@ function RoomPage() {
           table: 'suggestions',
           filter: `room_id=eq.${room.id}`,
         },
-        async () => {
+        async (payload) => {
           try {
-            await refreshRoomData(room.id)
-          } catch {}
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'suggestions',
-          filter: `room_id=eq.${room.id}`,
-        },
-        async () => {
-          try {
-            await refreshRoomData(room.id)
+            if (removedRef.current) return
+            const next = payload.new
+            if (!next) return
+
+            setSuggestions((prev) => {
+              const others = prev.filter((item) => item.id !== next.id)
+              const merged = [...others, next]
+              merged.sort((a, b) => a.created_at.localeCompare(b.created_at))
+              return merged
+            })
           } catch {}
         }
       )
@@ -408,6 +480,7 @@ function RoomPage() {
         },
         async (payload) => {
           try {
+            if (removedRef.current) return
             const deletedId = payload.old?.id
             if (!deletedId) return
 
@@ -432,6 +505,7 @@ function RoomPage() {
         },
         async () => {
           try {
+            if (removedRef.current) return
             await refreshRoomData(room.id)
           } catch {}
         }
@@ -444,16 +518,14 @@ function RoomPage() {
   }, [room?.id, participantId])
 
   useEffect(() => {
-    if (!participantId) return
+    if (!participantId || removedRef.current) return
 
     if (skipHydrateRef.current) {
       skipHydrateRef.current = false
       return
     }
 
-    if (saveTimeoutRef.current || savingVotes) {
-      return
-    }
+    if (saveTimeoutRef.current || savingVotes) return
 
     const mine = {}
     for (const vote of votes) {
@@ -476,13 +548,15 @@ function RoomPage() {
 
   async function handleSaveName(e) {
     e.preventDefault()
-    if (!participantId) return
+    if (!participantId || removedRef.current) return
 
     const trimmed = nameInput.trim()
     if (!trimmed) return
 
     setSavingName(true)
     setError('')
+
+    const oldName = displayName || 'Hungry Friend'
 
     const { error: updateError } = await supabase
       .from('participants')
@@ -493,6 +567,18 @@ function RoomPage() {
       setError(updateError.message)
     } else {
       setDisplayName(trimmed)
+
+      await supabase.from('messages').insert({
+        room_id: room.id,
+        participant_id: participantId || null,
+        type: 'system',
+        body: '',
+        meta: {
+          kind: 'rename',
+          oldName,
+          newName: trimmed,
+        },
+      })
     }
 
     setSavingName(false)
@@ -500,7 +586,7 @@ function RoomPage() {
 
   async function handleAddSuggestion(e) {
     e.preventDefault()
-    if (!room?.id || !participantId) return
+    if (!room?.id || !participantId || removedRef.current) return
 
     const trimmed = suggestionInput.trim()
     if (!trimmed) return
@@ -532,13 +618,25 @@ function RoomPage() {
       setError(insertError.message)
     } else {
       setSuggestionInput('')
+
+      await supabase.from('messages').insert({
+        room_id: room.id,
+        participant_id: participantId || null,
+        type: 'system',
+        body: '',
+        meta: {
+          kind: 'suggestion-added',
+          actor: displayName || 'Someone',
+          venue: trimmed,
+        },
+      })
     }
 
     setAddingSuggestion(false)
   }
 
   async function handleDeleteSuggestion(suggestionId) {
-    if (!room?.id) return
+    if (!room?.id || removedRef.current) return
 
     setDeletingSuggestionId(suggestionId)
     setError('')
@@ -557,6 +655,8 @@ function RoomPage() {
     })
 
     try {
+      const deletedSuggestion = previousSuggestions.find((item) => item.id === suggestionId)
+
       const { error: deleteError } = await supabase
         .from('suggestions')
         .delete()
@@ -564,6 +664,20 @@ function RoomPage() {
         .select()
 
       if (deleteError) throw deleteError
+
+      if (deletedSuggestion) {
+        await supabase.from('messages').insert({
+          room_id: room.id,
+          participant_id: participantId || null,
+          type: 'system',
+          body: '',
+          meta: {
+            kind: 'suggestion-removed',
+            actor: displayName || 'Someone',
+            venue: deletedSuggestion.name,
+          },
+        })
+      }
     } catch (err) {
       setSuggestions(previousSuggestions)
       setVotes(previousVotes)
@@ -576,7 +690,7 @@ function RoomPage() {
   }
 
   async function handleRemoveParticipant(participant) {
-    if (!room?.id) return
+    if (!room?.id || removedRef.current) return
     if (!participant?.id) return
     if (participant.id === participantId) return
 
@@ -611,6 +725,18 @@ function RoomPage() {
         .eq('id', participant.id)
 
       if (deleteParticipantError) throw deleteParticipantError
+
+      await supabase.from('messages').insert({
+        room_id: room.id,
+        participant_id: participantId || null,
+        type: 'system',
+        body: '',
+        meta: {
+          kind: 'participant-removed',
+          actor: displayName || 'Someone',
+          target: participant.display_name,
+        },
+      })
     } catch (err) {
       setParticipants(previousParticipants)
       setVotes(previousVotes)
@@ -631,6 +757,24 @@ function RoomPage() {
     }
   }
 
+  async function handleSendChat(e) {
+    e.preventDefault()
+    if (!room?.id || !chatInput.trim() || removedRef.current) return
+
+    const text = chatInput.trim()
+    setChatInput('')
+
+    await supabase.from('messages').insert({
+      room_id: room.id,
+      participant_id: participantId || null,
+      type: 'chat',
+      body: text,
+      meta: {
+        display_name: displayName || 'Hungry Friend',
+      },
+    })
+  }
+
   function scheduleVoteSave(nextDraft) {
     latestDraftRef.current = nextDraft
 
@@ -639,7 +783,7 @@ function RoomPage() {
     }
 
     saveTimeoutRef.current = setTimeout(async () => {
-      if (!room?.id || !participantId) return
+      if (!room?.id || !participantId || removedRef.current) return
 
       setSavingVotes(true)
 
@@ -660,7 +804,15 @@ function RoomPage() {
         if (upsertError) throw upsertError
 
         skipHydrateRef.current = true
-        await refreshRoomData(room.id)
+
+        const { data: voteRows, error: votesError } = await supabase
+          .from('votes')
+          .select('*')
+          .eq('room_id', room.id)
+
+        if (votesError) throw votesError
+
+        setVotes(voteRows ?? [])
       } catch (err) {
         setError(err.message || 'Could not save votes.')
       } finally {
@@ -690,6 +842,61 @@ function RoomPage() {
 
       return nextDraft
     })
+  }
+
+  function renderMessageContent(message) {
+    const meta = message.meta || {}
+
+    if (message.type === 'chat') {
+      return (
+        <>
+          <span className="chat-name">{meta.display_name || 'Hungry Friend'}</span>
+          <span className="chat-body">{message.body}</span>
+        </>
+      )
+    }
+
+    if (meta.kind === 'rename') {
+      return (
+        <span className="chat-body">
+          <strong>{meta.oldName}</strong> renamed themselves to <strong>{meta.newName}</strong>
+        </span>
+      )
+    }
+
+    if (meta.kind === 'join') {
+      return (
+        <span className="chat-body">
+          <strong>{meta.name}</strong> joined
+        </span>
+      )
+    }
+
+    if (meta.kind === 'participant-removed') {
+      return (
+        <span className="chat-body">
+          <strong>{meta.actor}</strong> removed <strong>{meta.target}</strong>
+        </span>
+      )
+    }
+
+    if (meta.kind === 'suggestion-added') {
+      return (
+        <span className="chat-body">
+          <strong>{meta.actor}</strong> added <strong>{meta.venue}</strong>
+        </span>
+      )
+    }
+
+    if (meta.kind === 'suggestion-removed') {
+      return (
+        <span className="chat-body">
+          <strong>{meta.actor}</strong> removed <strong>{meta.venue}</strong>
+        </span>
+      )
+    }
+
+    return <span className="chat-body">{message.body}</span>
   }
 
   const participantsWithColors = useMemo(() => {
@@ -784,24 +991,12 @@ function RoomPage() {
     return Math.max(...topThree.map((item) => totalsBySuggestion[item.id] ?? 0), 1)
   }, [topThree, totalsBySuggestion])
 
-  if (loading) {
+  if (loading && !removedModalOpen) {
     return (
       <div className="app-shell">
         <div className="card room-card">
           <h2>Loading room...</h2>
           <p className="subtext">Setting up your seat at the table.</p>
-        </div>
-      </div>
-    )
-  }
-
-  if (isRemoved) {
-    return (
-      <div className="app-shell">
-        <div className="card hero-card">
-          <p className="eyebrow">Session ended</p>
-          <h1>You have been removed from this session.</h1>
-          <p className="subtext">Taking you back to the home page.</p>
         </div>
       </div>
     )
@@ -922,9 +1117,9 @@ function RoomPage() {
             </section>
           </div>
 
-          <section className="panel">
+          <section className="panel compact-panel">
+            <p className="field-label">People in room</p>
             <div className="people-list people-list-wide">
-              <p className="field-label">People in room</p>
               {participantsWithColors.map((person) => (
                 <div
                   key={person.id}
@@ -948,13 +1143,50 @@ function RoomPage() {
                     className="person-remove"
                     aria-label={`Remove ${person.display_name}`}
                     onClick={() => handleRemoveParticipant(person)}
-                    disabled={person.id === participantId}
+                    disabled={person.id === participantId || removedModalOpen}
                   >
                     <span role="img" aria-hidden="true">✕</span>
                   </button>
                 </div>
               ))}
             </div>
+          </section>
+
+          <section className="panel compact-panel">
+            <div className="section-head">
+              <p className="field-label">Live chat</p>
+            </div>
+
+            <div className="chat-log" ref={chatLogRef} onScroll={handleChatScroll}>
+              {messages.length === 0 ? (
+                <div className="chat-empty">No updates yet.</div>
+              ) : (
+                messages.map((message) => (
+                  <div key={message.id} className={`chat-item chat-${message.type}`}>
+                    {renderMessageContent(message)}
+                  </div>
+                ))
+              )}
+              <div ref={chatBottomRef} />
+            </div>
+
+            <form className="chat-form" onSubmit={handleSendChat}>
+              <input
+                className="input"
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                placeholder="Send a message"
+                maxLength={240}
+                disabled={removedModalOpen}
+              />
+              <button
+                className="btn btn-primary"
+                type="submit"
+                disabled={!chatInput.trim() || removedModalOpen}
+              >
+                Send
+              </button>
+            </form>
           </section>
 
           <section className="panel panel-wide">
@@ -987,10 +1219,7 @@ function RoomPage() {
                       </div>
 
                       <div className="rank-track">
-                        <div
-                          className="rank-stack"
-                          style={{ width: `${width}%` }}
-                        >
+                        <div className="rank-stack" style={{ width: `${width}%` }}>
                           {segments.map((segment) => {
                             const percent = total > 0 ? (segment.points / total) * 100 : 0
                             if (percent <= 0) return null
@@ -1029,11 +1258,12 @@ function RoomPage() {
                   onChange={(e) => setSuggestionInput(e.target.value.slice(0, 100))}
                   placeholder="e.g. Shake Shack, Sushiro, Din Tai Fung"
                   maxLength={100}
+                  disabled={removedModalOpen}
                 />
                 <button
                   className="btn btn-primary"
                   type="submit"
-                  disabled={addingSuggestion}
+                  disabled={addingSuggestion || removedModalOpen}
                 >
                   {addingSuggestion ? 'Adding...' : 'Add'}
                 </button>
@@ -1077,7 +1307,7 @@ function RoomPage() {
                             type="button"
                             className="btn btn-delete"
                             onClick={() => handleDeleteSuggestion(item.id)}
-                            disabled={deletingSuggestionId === item.id}
+                            disabled={deletingSuggestionId === item.id || removedModalOpen}
                           >
                             {deletingSuggestionId === item.id ? 'Deleting...' : 'Delete'}
                           </button>
@@ -1118,6 +1348,7 @@ function RoomPage() {
                           value={myPoints}
                           onChange={(e) => handleSliderChange(item.id, e.target.value)}
                           className="vote-slider"
+                          disabled={removedModalOpen}
                           style={{
                             background: `linear-gradient(to right, #0f6c70 0%, #0f6c70 ${sliderPercent}%, #e8dfd5 ${sliderPercent}%, #e8dfd5 100%)`,
                           }}
@@ -1135,6 +1366,22 @@ function RoomPage() {
           </section>
         </div>
       </div>
+
+      {removedModalOpen ? (
+        <div className="modal-backdrop">
+          <div className="modal-card">
+            <p className="eyebrow">Session ended</p>
+            <h3>You have been removed</h3>
+            <p className="subtext small">{removedModalMessage}</p>
+            <p className="modal-note">You can return now, or wait a few seconds for automatic redirect.</p>
+            <div className="modal-actions">
+              <button className="btn btn-primary" type="button" onClick={handleReturnHome}>
+                Return to home page
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }
