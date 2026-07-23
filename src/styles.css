@@ -184,6 +184,15 @@
     background: #e5dccf;
   }
   
+  .btn-delete {
+    background: #f6e5e8;
+    color: #9c3050;
+  }
+  
+  .btn-delete:hover:enabled {
+    background: #efd6db;
+  }
+  
   .error-text {
     margin-top: 16px;
     color: var(--error);
@@ -282,12 +291,20 @@
   .person-chip {
     display: inline-flex;
     align-items: center;
+    gap: 8px;
     margin: 0 8px 8px 0;
     padding: 10px 12px;
     border-radius: var(--radius-pill);
     background: var(--surface-2);
     color: var(--text);
     font-size: 0.94rem;
+  }
+  
+  .person-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
   }
   
   .results-top {
@@ -344,6 +361,19 @@
     transition: width 260ms cubic-bezier(0.16, 1, 0.3, 1);
   }
   
+  .rank-stack {
+    display: flex;
+    height: 100%;
+    min-width: 8px;
+    border-radius: var(--radius-pill);
+    overflow: hidden;
+    transition: width 260ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  
+  .rank-segment {
+    height: 100%;
+  }
+  
   .add-form {
     margin-top: 0;
   }
@@ -384,6 +414,13 @@
     font-size: 0.96rem;
   }
   
+  .suggestion-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+  }
+  
   .pill-total {
     flex-shrink: 0;
     min-width: 50px;
@@ -392,6 +429,20 @@
     border-radius: var(--radius-pill);
     background: var(--surface-2);
     font-weight: 700;
+  }
+  
+  .stacked-total-bar {
+    display: flex;
+    width: 100%;
+    height: 10px;
+    margin-top: 14px;
+    border-radius: 999px;
+    overflow: hidden;
+    background: #ece3d8;
+  }
+  
+  .stacked-total-segment {
+    height: 100%;
   }
   
   .slider-block {
@@ -498,5 +549,10 @@
   
     h1 {
       max-width: none;
+    }
+  
+    .suggestion-actions {
+      width: 100%;
+      justify-content: space-between;
     }
   }
