@@ -214,12 +214,53 @@
     color: var(--muted);
   }
   
+  .room-id-wrap {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+  
+  .room-id-label {
+    font-size: 0.82rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  
   .room-pill {
     padding: 10px 14px;
     border-radius: var(--radius-pill);
     background: var(--surface-2);
     color: var(--text);
     font-size: 0.95rem;
+  }
+  
+  .room-pill strong {
+    font-weight: 800;
+    letter-spacing: 0.08em;
+  }
+  
+  .copy-link-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    border: 1px solid var(--border);
+    background: var(--surface-3);
+    color: var(--text);
+    border-radius: var(--radius-pill);
+    padding: 10px 14px;
+    cursor: pointer;
+  }
+  
+  .copy-link-btn:hover {
+    background: #f3ece2;
+  }
+  
+  .copy-message {
+    font-size: 0.92rem;
+    color: var(--muted);
   }
   
   .room-stack {
@@ -362,6 +403,24 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  
+  .person-remove {
+    border: none;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    padding: 0 0 0 4px;
+    margin-left: 2px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  
+  .person-remove:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
   }
   
   .results-top {
@@ -598,6 +657,10 @@
   
     .btn {
       width: 100%;
+    }
+  
+    .room-id-wrap {
+      justify-content: flex-start;
     }
   
     .rank-head {

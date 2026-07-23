@@ -34,6 +34,10 @@ function truncateLabel(value, max = 50) {
   return `${text.slice(0, max)}...`
 }
 
+function roomLink(code) {
+  return `${window.location.origin}/room/${code}`
+}
+
 function HomePage() {
   const navigate = useNavigate()
   const [joinCode, setJoinCode] = useState('')
@@ -128,6 +132,7 @@ function HomePage() {
 }
 
 function RoomPage() {
+  const navigate = useNavigate()
   const { code } = useParams()
   const upperCode = useMemo(() => code?.toUpperCase() ?? '', [code])
 
@@ -145,11 +150,15 @@ function RoomPage() {
   const [addingSuggestion, setAddingSuggestion] = useState(false)
   const [deletingSuggestionId, setDeletingSuggestionId] = useState('')
   const [savingVotes, setSavingVotes] = useState(false)
+  const [copyMessage, setCopyMessage] = useState('')
   const [error, setError] = useState('')
+  const [isRemoved, setIsRemoved] = useState(false)
 
   const saveTimeoutRef = useRef(null)
   const latestDraftRef = useRef({})
   const skipHydrateRef = useRef(false)
+  const copyTimerRef = useRef(null)
+  const redirectTimerRef = useRef(null)
 
   async function refreshRoomData(roomId) {
     const [
@@ -180,6 +189,28 @@ function RoomPage() {
     setParticipants(participantRows ?? [])
     setSuggestions(suggestionRows ?? [])
     setVotes(voteRows ?? [])
+  }
+
+  function handleRemovedFromSession() {
+    if (isRemoved) return
+
+    setIsRemoved(true)
+    localStorage.removeItem(getParticipantStorageKey(upperCode))
+    setParticipantId('')
+    setDisplayName('')
+    setNameInput('')
+    setDraftVotes({})
+    latestDraftRef.current = {}
+    setVotes([])
+    setSuggestions([])
+    setParticipants([])
+
+    window.alert('You have been removed from this session.')
+
+    if (redirectTimerRef.current) clearTimeout(redirectTimerRef.current)
+    redirectTimerRef.current = setTimeout(() => {
+      navigate('/', { replace: true })
+    }, 50)
   }
 
   useEffect(() => {
@@ -236,7 +267,7 @@ function RoomPage() {
           }
         }
 
-        if (!localParticipantId) {
+        if (!localParticipantId && !isRemoved) {
           const defaultName = `Hungry Friend ${Math.floor(Math.random() * 900 + 100)}`
 
           const { data: newParticipant, error: participantError } = await supabase
@@ -280,14 +311,13 @@ function RoomPage() {
     return () => {
       active = false
     }
-  }, [upperCode])
+  }, [upperCode, isRemoved])
 
   useEffect(() => {
     if (!room?.id) return
 
     const channel = supabase
       .channel(`room-${room.id}`)
-
       .on(
         'postgres_changes',
         {
@@ -296,13 +326,51 @@ function RoomPage() {
           table: 'participants',
           filter: `room_id=eq.${room.id}`,
         },
-        async () => {
+        async (payload) => {
           try {
+            if (payload.eventType === 'DELETE') {
+              const deletedId = payload.old?.id
+              if (!deletedId) return
+
+              setParticipants((prev) => prev.filter((item) => item.id !== deletedId))
+              setVotes((prev) => prev.filter((vote) => vote.participant_id !== deletedId))
+
+              if (deletedId === participantId) {
+                handleRemovedFromSession()
+                return
+              }
+
+              return
+            }
+
             await refreshRoomData(room.id)
           } catch {}
         }
       )
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'kicks',
+          filter: `room_id=eq.${room.id}`,
+        },
+        async (payload) => {
+          try {
+            const kickedParticipantId = payload.new?.participant_id
+            if (!kickedParticipantId) return
 
+            if (kickedParticipantId === participantId) {
+              handleRemovedFromSession()
+
+              await supabase
+                .from('kicks')
+                .delete()
+                .eq('id', payload.new.id)
+            }
+          } catch {}
+        }
+      )
       .on(
         'postgres_changes',
         {
@@ -317,7 +385,6 @@ function RoomPage() {
           } catch {}
         }
       )
-
       .on(
         'postgres_changes',
         {
@@ -332,7 +399,6 @@ function RoomPage() {
           } catch {}
         }
       )
-
       .on(
         'postgres_changes',
         {
@@ -356,7 +422,6 @@ function RoomPage() {
           } catch {}
         }
       )
-
       .on(
         'postgres_changes',
         {
@@ -376,7 +441,7 @@ function RoomPage() {
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [room?.id])
+  }, [room?.id, participantId])
 
   useEffect(() => {
     if (!participantId) return
@@ -403,9 +468,9 @@ function RoomPage() {
 
   useEffect(() => {
     return () => {
-      if (saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current)
-      }
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current)
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current)
+      if (redirectTimerRef.current) clearTimeout(redirectTimerRef.current)
     }
   }, [])
 
@@ -507,6 +572,62 @@ function RoomPage() {
       setError(err.message || 'Could not delete place.')
     } finally {
       setDeletingSuggestionId('')
+    }
+  }
+
+  async function handleRemoveParticipant(participant) {
+    if (!room?.id) return
+    if (!participant?.id) return
+    if (participant.id === participantId) return
+
+    const ok = window.confirm(`Remove ${participant.display_name}?`)
+    if (!ok) return
+
+    const previousParticipants = participants
+    const previousVotes = votes
+
+    setParticipants((prev) => prev.filter((item) => item.id !== participant.id))
+    setVotes((prev) => prev.filter((vote) => vote.participant_id !== participant.id))
+
+    try {
+      const { error: kickInsertError } = await supabase.from('kicks').insert({
+        room_id: room.id,
+        participant_id: participant.id,
+      })
+
+      if (kickInsertError) throw kickInsertError
+
+      const { error: deleteVotesError } = await supabase
+        .from('votes')
+        .delete()
+        .eq('room_id', room.id)
+        .eq('participant_id', participant.id)
+
+      if (deleteVotesError) throw deleteVotesError
+
+      const { error: deleteParticipantError } = await supabase
+        .from('participants')
+        .delete()
+        .eq('id', participant.id)
+
+      if (deleteParticipantError) throw deleteParticipantError
+    } catch (err) {
+      setParticipants(previousParticipants)
+      setVotes(previousVotes)
+      setError(err.message || 'Could not remove user.')
+    }
+  }
+
+  async function handleCopyLink() {
+    try {
+      await navigator.clipboard.writeText(roomLink(upperCode))
+      setCopyMessage('Link copied')
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current)
+      copyTimerRef.current = setTimeout(() => setCopyMessage(''), 1400)
+    } catch {
+      setCopyMessage('Copy failed')
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current)
+      copyTimerRef.current = setTimeout(() => setCopyMessage(''), 1400)
     }
   }
 
@@ -674,6 +795,18 @@ function RoomPage() {
     )
   }
 
+  if (isRemoved) {
+    return (
+      <div className="app-shell">
+        <div className="card hero-card">
+          <p className="eyebrow">Session ended</p>
+          <h1>You have been removed from this session.</h1>
+          <p className="subtext">Taking you back to the home page.</p>
+        </div>
+      </div>
+    )
+  }
+
   if (error === 'Room not found.') {
     return (
       <div className="app-shell">
@@ -682,7 +815,16 @@ function RoomPage() {
             <Link to="/" className="back-link">
               Back
             </Link>
-            <span className="room-pill">Code {upperCode}</span>
+            <div className="room-id-wrap">
+              <span className="room-id-label">ROOM ID</span>
+              <span className="room-pill">
+                <strong>{upperCode}</strong>
+              </span>
+              <button className="copy-link-btn" onClick={handleCopyLink} type="button">
+                <span role="img" aria-hidden="true">🔗</span>
+                Copy link
+              </button>
+            </div>
           </div>
           <h2>Couldn't open room</h2>
           <p className="error-text">{error}</p>
@@ -700,7 +842,17 @@ function RoomPage() {
           <Link to="/" className="back-link">
             Back
           </Link>
-          <span className="room-pill">Code {upperCode}</span>
+          <div className="room-id-wrap">
+            <span className="room-id-label">ROOM ID</span>
+            <span className="room-pill">
+              <strong>{upperCode}</strong>
+            </span>
+            <button className="copy-link-btn" onClick={handleCopyLink} type="button">
+              <span role="img" aria-hidden="true">🔗</span>
+              Copy link
+            </button>
+            {copyMessage ? <span className="copy-message">{copyMessage}</span> : null}
+          </div>
         </div>
 
         <div className="room-stack">
@@ -791,6 +943,15 @@ function RoomPage() {
                   <span className="person-chip-text">
                     {truncateLabel(person.display_name, 22)}
                   </span>
+                  <button
+                    type="button"
+                    className="person-remove"
+                    aria-label={`Remove ${person.display_name}`}
+                    onClick={() => handleRemoveParticipant(person)}
+                    disabled={person.id === participantId}
+                  >
+                    <span role="img" aria-hidden="true">✕</span>
+                  </button>
                 </div>
               ))}
             </div>
