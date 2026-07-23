@@ -287,6 +287,7 @@ function RoomPage() {
 
     const channel = supabase
       .channel(`room-${room.id}`)
+
       .on(
         'postgres_changes',
         {
@@ -301,25 +302,61 @@ function RoomPage() {
           } catch {}
         }
       )
+
       .on(
         'postgres_changes',
         {
-          event: '*',
+          event: 'INSERT',
+          schema: 'public',
+          table: 'suggestions',
+          filter: `room_id=eq.${room.id}`,
+        },
+        async () => {
+          try {
+            await refreshRoomData(room.id)
+          } catch {}
+        }
+      )
+
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'suggestions',
+          filter: `room_id=eq.${room.id}`,
+        },
+        async () => {
+          try {
+            await refreshRoomData(room.id)
+          } catch {}
+        }
+      )
+
+      .on(
+        'postgres_changes',
+        {
+          event: 'DELETE',
           schema: 'public',
           table: 'suggestions',
         },
         async (payload) => {
           try {
-            const payloadRoomId =
-              payload.new?.room_id ??
-              payload.old?.room_id
+            const deletedId = payload.old?.id
+            if (!deletedId) return
 
-            if (payloadRoomId === room.id) {
-              await refreshRoomData(room.id)
-            }
+            setSuggestions((prev) => prev.filter((item) => item.id !== deletedId))
+            setVotes((prev) => prev.filter((vote) => vote.suggestion_id !== deletedId))
+            setDraftVotes((prev) => {
+              const next = { ...prev }
+              delete next[deletedId]
+              latestDraftRef.current = next
+              return next
+            })
           } catch {}
         }
       )
+
       .on(
         'postgres_changes',
         {
@@ -462,8 +499,6 @@ function RoomPage() {
         .select()
 
       if (deleteError) throw deleteError
-
-      await refreshRoomData(room.id)
     } catch (err) {
       setSuggestions(previousSuggestions)
       setVotes(previousVotes)
@@ -543,14 +578,6 @@ function RoomPage() {
       orderIndex: index,
     }))
   }, [participants])
-
-  const participantColorMap = useMemo(() => {
-    const map = {}
-    for (const participant of participantsWithColors) {
-      map[participant.id] = participant
-    }
-    return map
-  }, [participantsWithColors])
 
   const myUsedPoints = useMemo(() => {
     return Object.values(draftVotes).reduce((sum, value) => sum + value, 0)
@@ -676,68 +703,75 @@ function RoomPage() {
           <span className="room-pill">Code {upperCode}</span>
         </div>
 
-        <div className="winner-banner">
-          <div className="winner-copy">
-            <p className="eyebrow">Current leader</p>
-            <h2 title={leader?.name ?? ''}>
-              {leader ? truncateLabel(leader.name, 50) : 'Waiting for suggestions'}
-            </h2>
-            <p className="subtext small">
-              {leader
-                ? `${totalsBySuggestion[leader.id] ?? 0} total points so far.`
-                : 'Add a place to get started.'}
-            </p>
-          </div>
-          <div className="sync-badge">{savingVotes ? 'Saving...' : 'Live'}</div>
-        </div>
-
-        <div className="room-grid">
-          <section className="panel">
-            <p className="eyebrow">You</p>
-            <h2 title={displayName || 'Hungry Friend'}>
-              {truncateLabel(displayName || 'Hungry Friend', 24)}
-            </h2>
-            <p className="subtext small">
-              You have {myRemainingPoints} points left out of 100.
-            </p>
-
-            <form onSubmit={handleSaveName} className="stack-form">
-              <label className="field-label" htmlFor="display-name">
-                Rename yourself
-              </label>
-              <div className="join-row">
-                <input
-                  id="display-name"
-                  className="input"
-                  value={nameInput}
-                  onChange={(e) => setNameInput(e.target.value)}
-                  placeholder="Enter your display name"
-                  maxLength={60}
-                />
-                <button
-                  className="btn btn-secondary"
-                  type="submit"
-                  disabled={savingName}
-                >
-                  {savingName ? 'Saving...' : 'Save'}
-                </button>
-              </div>
-            </form>
-
-            <div className="meter-wrap">
-              <div className="meter-labels">
-                <span>Used {myUsedPoints}</span>
-                <span>Remaining {myRemainingPoints}</span>
-              </div>
-              <div className="meter">
-                <div
-                  className="meter-fill"
-                  style={{ width: `${Math.min(myUsedPoints, 100)}%` }}
-                />
-              </div>
+        <div className="room-stack">
+          <section className="panel winner-banner">
+            <div className="winner-copy">
+              <p className="eyebrow">Current leader</p>
+              <h2 title={leader?.name ?? ''}>
+                {leader ? truncateLabel(leader.name, 50) : 'Waiting for suggestions'}
+              </h2>
+              <p className="subtext small">
+                {leader
+                  ? `${totalsBySuggestion[leader.id] ?? 0} total points so far.`
+                  : 'Add a place to get started.'}
+              </p>
             </div>
+            <div className="sync-badge">{savingVotes ? 'Saving...' : 'Live'}</div>
+          </section>
 
-            <div className="people-list">
+          <div className="you-points-grid">
+            <section className="panel you-panel">
+              <p className="eyebrow">You</p>
+              <h2 title={displayName || 'Hungry Friend'}>
+                {truncateLabel(displayName || 'Hungry Friend', 32)}
+              </h2>
+
+              <form onSubmit={handleSaveName} className="stack-form you-rename-form">
+                <label className="field-label" htmlFor="display-name">
+                  Rename yourself
+                </label>
+                <div className="join-row">
+                  <input
+                    id="display-name"
+                    className="input"
+                    value={nameInput}
+                    onChange={(e) => setNameInput(e.target.value)}
+                    placeholder="Enter your display name"
+                    maxLength={60}
+                  />
+                  <button
+                    className="btn btn-secondary"
+                    type="submit"
+                    disabled={savingName}
+                  >
+                    {savingName ? 'Saving...' : 'Save'}
+                  </button>
+                </div>
+              </form>
+            </section>
+
+            <section className="panel you-points-panel">
+              <p className="eyebrow">Points left</p>
+              <div className="you-points-value">{myRemainingPoints}</div>
+              <p className="subtext small">out of 100</p>
+
+              <div className="meter-wrap compact">
+                <div className="meter-labels">
+                  <span>Used {myUsedPoints}</span>
+                  <span>Remaining {myRemainingPoints}</span>
+                </div>
+                <div className="meter">
+                  <div
+                    className="meter-fill"
+                    style={{ width: `${Math.min(myUsedPoints, 100)}%` }}
+                  />
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <section className="panel">
+            <div className="people-list people-list-wide">
               <p className="field-label">People in room</p>
               {participantsWithColors.map((person) => (
                 <div
@@ -755,7 +789,7 @@ function RoomPage() {
                     style={{ background: person.color.solid }}
                   />
                   <span className="person-chip-text">
-                    {truncateLabel(person.display_name, 18)}
+                    {truncateLabel(person.display_name, 22)}
                   </span>
                 </div>
               ))}
@@ -819,7 +853,9 @@ function RoomPage() {
                 })
               )}
             </div>
+          </section>
 
+          <section className="panel panel-wide">
             <form onSubmit={handleAddSuggestion} className="stack-form add-form">
               <label className="field-label" htmlFor="suggestion-name">
                 Add a place

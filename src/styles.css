@@ -85,21 +85,24 @@
   h2,
   h3 {
     margin: 0;
-    line-height: 1.04;
     letter-spacing: -0.04em;
+    color: var(--text);
   }
   
   h1 {
     font-size: clamp(2.4rem, 5vw, 4.8rem);
+    line-height: 1.02;
     max-width: 11ch;
   }
   
   h2 {
     font-size: clamp(1.9rem, 3.3vw, 2.8rem);
+    line-height: 1.08;
   }
   
   h3 {
     font-size: 1.15rem;
+    line-height: 1.18;
     letter-spacing: -0.02em;
   }
   
@@ -113,6 +116,7 @@
   
   .subtext.small {
     font-size: 0.98rem;
+    line-height: 1.55;
   }
   
   .actions {
@@ -218,44 +222,9 @@
     font-size: 0.95rem;
   }
   
-  .winner-banner {
-    display: flex;
-    justify-content: space-between;
-    gap: 16px;
-    align-items: flex-start;
-    padding: 22px;
-    margin-bottom: 20px;
-    border-radius: var(--radius-lg);
-    border: 1px solid var(--border);
-    background: linear-gradient(135deg, rgba(255, 253, 250, 0.96), rgba(240, 248, 247, 0.92));
-  }
-  
-  .winner-copy {
-    min-width: 0;
-    flex: 1;
-  }
-  
-  .winner-copy h2 {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  
-  .sync-badge {
-    flex-shrink: 0;
-    padding: 10px 14px;
-    border-radius: var(--radius-pill);
-    background: #e3f2ef;
-    color: var(--primary);
-    font-weight: 600;
-  }
-  
-  .room-grid {
+  .room-stack {
     display: grid;
-    grid-template-columns: 340px minmax(0, 1fr);
     gap: 20px;
-    align-items: start;
   }
   
   .panel {
@@ -270,15 +239,67 @@
     min-width: 0;
   }
   
-  .panel h2 {
+  .winner-banner {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    align-items: flex-start;
+    background: linear-gradient(135deg, rgba(255, 253, 250, 0.96), rgba(240, 248, 247, 0.92));
+  }
+  
+  .winner-copy {
+    min-width: 0;
+    flex: 1;
+  }
+  
+  .winner-copy h2 {
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    padding-bottom: 4px;
+  }
+  
+  .sync-badge {
+    flex-shrink: 0;
+    padding: 10px 14px;
+    border-radius: var(--radius-pill);
+    background: #e3f2ef;
+    color: var(--primary);
+    font-weight: 600;
+  }
+  
+  .you-points-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 20px;
+  }
+  
+  .you-panel,
+  .you-points-panel {
+    min-height: 250px;
+    display: flex;
+    flex-direction: column;
+  }
+  
+  .you-rename-form {
+    margin-top: 22px;
+  }
+  
+  .you-points-value {
+    font-size: clamp(2.6rem, 5vw, 4rem);
+    line-height: 0.95;
+    letter-spacing: -0.05em;
+    font-weight: 700;
+    margin-top: 4px;
   }
   
   .meter-wrap {
     margin-top: 24px;
+  }
+  
+  .meter-wrap.compact {
+    margin-top: auto;
   }
   
   .meter-labels {
@@ -308,6 +329,10 @@
     margin-top: 24px;
   }
   
+  .people-list-wide {
+    margin-top: 0;
+  }
+  
   .person-chip {
     display: inline-flex;
     align-items: center;
@@ -332,7 +357,7 @@
   
   .person-chip-text {
     display: inline-block;
-    max-width: 140px;
+    max-width: 180px;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -346,7 +371,7 @@
   .rank-chart {
     display: grid;
     gap: 14px;
-    margin-bottom: 24px;
+    margin-bottom: 0;
   }
   
   .rank-row {
@@ -544,8 +569,13 @@
   }
   
   @media (max-width: 960px) {
-    .room-grid {
+    .you-points-grid {
       grid-template-columns: 1fr;
+    }
+  
+    .you-panel,
+    .you-points-panel {
+      min-height: auto;
     }
   }
   
