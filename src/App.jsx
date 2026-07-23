@@ -28,6 +28,12 @@ function getParticipantStorageKey(roomCode) {
   return `food-decider-participant-${roomCode}`
 }
 
+function truncateLabel(value, max = 50) {
+  const text = String(value ?? '').trim()
+  if (text.length <= max) return text
+  return `${text.slice(0, max)}...`
+}
+
 function HomePage() {
   const navigate = useNavigate()
   const [joinCode, setJoinCode] = useState('')
@@ -231,9 +237,7 @@ function RoomPage() {
         }
 
         if (!localParticipantId) {
-          const defaultName = `Hungry Friend ${Math.floor(
-            Math.random() * 900 + 100
-          )}`
+          const defaultName = `Hungry Friend ${Math.floor(Math.random() * 900 + 100)}`
 
           const { data: newParticipant, error: participantError } = await supabase
             .from('participants')
@@ -285,7 +289,12 @@ function RoomPage() {
       .channel(`room-${room.id}`)
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'participants', filter: `room_id=eq.${room.id}` },
+        {
+          event: '*',
+          schema: 'public',
+          table: 'participants',
+          filter: `room_id=eq.${room.id}`,
+        },
         async () => {
           try {
             await refreshRoomData(room.id)
@@ -294,16 +303,31 @@ function RoomPage() {
       )
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'suggestions', filter: `room_id=eq.${room.id}` },
-        async () => {
+        {
+          event: '*',
+          schema: 'public',
+          table: 'suggestions',
+        },
+        async (payload) => {
           try {
-            await refreshRoomData(room.id)
+            const payloadRoomId =
+              payload.new?.room_id ??
+              payload.old?.room_id
+
+            if (payloadRoomId === room.id) {
+              await refreshRoomData(room.id)
+            }
           } catch {}
         }
       )
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'votes', filter: `room_id=eq.${room.id}` },
+        {
+          event: '*',
+          schema: 'public',
+          table: 'votes',
+          filter: `room_id=eq.${room.id}`,
+        },
         async () => {
           try {
             await refreshRoomData(room.id)
@@ -413,14 +437,14 @@ function RoomPage() {
 
   async function handleDeleteSuggestion(suggestionId) {
     if (!room?.id) return
-  
+
     setDeletingSuggestionId(suggestionId)
     setError('')
-  
+
     const previousSuggestions = suggestions
     const previousVotes = votes
     const previousDraftVotes = draftVotes
-  
+
     setSuggestions((prev) => prev.filter((item) => item.id !== suggestionId))
     setVotes((prev) => prev.filter((vote) => vote.suggestion_id !== suggestionId))
     setDraftVotes((prev) => {
@@ -429,16 +453,16 @@ function RoomPage() {
       latestDraftRef.current = next
       return next
     })
-  
+
     try {
       const { error: deleteError } = await supabase
         .from('suggestions')
         .delete()
         .eq('id', suggestionId)
         .select()
-  
+
       if (deleteError) throw deleteError
-  
+
       await refreshRoomData(room.id)
     } catch (err) {
       setSuggestions(previousSuggestions)
@@ -653,9 +677,11 @@ function RoomPage() {
         </div>
 
         <div className="winner-banner">
-          <div>
+          <div className="winner-copy">
             <p className="eyebrow">Current leader</p>
-            <h2>{leader ? leader.name : 'Waiting for suggestions'}</h2>
+            <h2 title={leader?.name ?? ''}>
+              {leader ? truncateLabel(leader.name, 50) : 'Waiting for suggestions'}
+            </h2>
             <p className="subtext small">
               {leader
                 ? `${totalsBySuggestion[leader.id] ?? 0} total points so far.`
@@ -668,9 +694,11 @@ function RoomPage() {
         <div className="room-grid">
           <section className="panel">
             <p className="eyebrow">You</p>
-            <h2>{displayName || 'Hungry Friend'}</h2>
+            <h2 title={displayName || 'Hungry Friend'}>
+              {truncateLabel(displayName || 'Hungry Friend', 24)}
+            </h2>
             <p className="subtext small">
-              You have <strong>{myRemainingPoints}</strong> points left out of 100.
+              You have {myRemainingPoints} points left out of 100.
             </p>
 
             <form onSubmit={handleSaveName} className="stack-form">
@@ -684,7 +712,7 @@ function RoomPage() {
                   value={nameInput}
                   onChange={(e) => setNameInput(e.target.value)}
                   placeholder="Enter your display name"
-                  maxLength={30}
+                  maxLength={60}
                 />
                 <button
                   className="btn btn-secondary"
@@ -720,12 +748,15 @@ function RoomPage() {
                     border: `1px solid ${person.color.solid}33`,
                     color: person.color.solid,
                   }}
+                  title={person.display_name}
                 >
                   <span
                     className="person-dot"
                     style={{ background: person.color.solid }}
                   />
-                  {person.display_name}
+                  <span className="person-chip-text">
+                    {truncateLabel(person.display_name, 18)}
+                  </span>
                 </div>
               ))}
             </div>
@@ -754,7 +785,9 @@ function RoomPage() {
                     <div key={item.id} className="rank-row">
                       <div className="rank-head">
                         <span className="rank-index">{index + 1}</span>
-                        <span className="rank-name">{item.name}</span>
+                        <span className="rank-name" title={item.name}>
+                          {truncateLabel(item.name, 50)}
+                        </span>
                         <span className="rank-total">{total}</span>
                       </div>
 
@@ -835,7 +868,7 @@ function RoomPage() {
                     <div key={item.id} className="suggestion-card">
                       <div className="suggestion-main">
                         <div className="suggestion-copy">
-                          <h3 title={item.name}>{item.name}</h3>
+                          <h3 title={item.name}>{truncateLabel(item.name, 50)}</h3>
                           <p className="suggestion-meta">
                             Total {totalPoints} points · Yours {myPoints}
                           </p>
@@ -886,9 +919,7 @@ function RoomPage() {
                           max="100"
                           step="1"
                           value={myPoints}
-                          onChange={(e) =>
-                            handleSliderChange(item.id, e.target.value)
-                          }
+                          onChange={(e) => handleSliderChange(item.id, e.target.value)}
                           className="vote-slider"
                           style={{
                             background: `linear-gradient(to right, #0f6c70 0%, #0f6c70 ${sliderPercent}%, #e8dfd5 ${sliderPercent}%, #e8dfd5 100%)`,
