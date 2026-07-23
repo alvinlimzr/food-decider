@@ -5,9 +5,11 @@ import { supabase } from './supabase'
 function generateRoomCode() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
   let code = ''
+
   for (let i = 0; i < 6; i += 1) {
     code += chars[Math.floor(Math.random() * chars.length)]
   }
+
   return code
 }
 
@@ -31,7 +33,6 @@ function HomePage() {
 
       while (!createdRoom && attempts < 5) {
         const code = generateRoomCode()
-
         const { data, error: insertError } = await supabase
           .from('rooms')
           .insert({ code })
@@ -70,11 +71,16 @@ function HomePage() {
         <p className="eyebrow">Food Decider</p>
         <h1>Pick a place without the group chat chaos.</h1>
         <p className="subtext">
-          Create a room, share the code, add options, and drag your 100 points toward what you actually want to eat.
+          Create a room, share the code, add options, and drag your 100 points
+          toward what you actually want to eat.
         </p>
 
         <div className="actions">
-          <button className="btn btn-primary" onClick={handleCreateRoom} disabled={loading}>
+          <button
+            className="btn btn-primary"
+            onClick={handleCreateRoom}
+            disabled={loading}
+          >
             {loading ? 'Creating...' : 'Create room'}
           </button>
         </div>
@@ -106,7 +112,7 @@ function HomePage() {
 
 function RoomPage() {
   const { code } = useParams()
-  const upperCode = useMemo(() => (code || '').toUpperCase(), [code])
+  const upperCode = useMemo(() => code?.toUpperCase() ?? '', [code])
 
   const [room, setRoom] = useState(null)
   const [participantId, setParticipantId] = useState('')
@@ -127,6 +133,34 @@ function RoomPage() {
   const latestDraftRef = useRef({})
   const skipHydrateRef = useRef(false)
 
+  async function refreshRoomData(roomId) {
+    const [
+      { data: participantRows, error: participantsError },
+      { data: suggestionRows, error: suggestionsError },
+      { data: voteRows, error: votesError },
+    ] = await Promise.all([
+      supabase
+        .from('participants')
+        .select('*')
+        .eq('room_id', roomId)
+        .order('created_at', { ascending: true }),
+      supabase
+        .from('suggestions')
+        .select('*')
+        .eq('room_id', roomId)
+        .order('created_at', { ascending: true }),
+      supabase.from('votes').select('*').eq('room_id', roomId),
+    ])
+
+    if (participantsError) throw participantsError
+    if (suggestionsError) throw suggestionsError
+    if (votesError) throw votesError
+
+    setParticipants(participantRows ?? [])
+    setSuggestions(suggestionRows ?? [])
+    setVotes(voteRows ?? [])
+  }
+
   useEffect(() => {
     let active = true
 
@@ -134,91 +168,94 @@ function RoomPage() {
       setLoading(true)
       setError('')
 
-      const { data: roomData, error: roomError } = await supabase
-        .from('rooms')
-        .select('*')
-        .eq('code', upperCode)
-        .maybeSingle()
-
-      if (!active) return
-
-      if (roomError) {
-        setError(roomError.message)
-        setLoading(false)
-        return
-      }
-
-      if (!roomData) {
-        setError('Room not found.')
-        setLoading(false)
-        return
-      }
-
-      setRoom(roomData)
-
-      let localParticipantId = localStorage.getItem(getParticipantStorageKey(upperCode))
-
-      if (localParticipantId) {
-        const { data: existingParticipant } = await supabase
-          .from('participants')
+      try {
+        const { data: roomData, error: roomError } = await supabase
+          .from('rooms')
           .select('*')
-          .eq('id', localParticipantId)
-          .eq('room_id', roomData.id)
+          .eq('code', upperCode)
           .maybeSingle()
 
-        if (existingParticipant) {
-          setParticipantId(existingParticipant.id)
-          setDisplayName(existingParticipant.display_name)
-          setNameInput(existingParticipant.display_name)
-        } else {
-          localParticipantId = ''
-          localStorage.removeItem(getParticipantStorageKey(upperCode))
-        }
-      }
+        if (!active) return
 
-      if (!localParticipantId) {
-        const defaultName = `Hungry Friend ${Math.floor(Math.random() * 900 + 100)}`
-
-        const { data: newParticipant, error: participantError } = await supabase
-          .from('participants')
-          .insert({
-            room_id: roomData.id,
-            display_name: defaultName,
-          })
-          .select()
-          .single()
-
-        if (participantError) {
-          setError(participantError.message)
+        if (roomError) {
+          setError(roomError.message)
           setLoading(false)
           return
         }
 
-        localStorage.setItem(getParticipantStorageKey(upperCode), newParticipant.id)
-        setParticipantId(newParticipant.id)
-        setDisplayName(newParticipant.display_name)
-        setNameInput(newParticipant.display_name)
-      }
+        if (!roomData) {
+          setError('Room not found.')
+          setLoading(false)
+          return
+        }
 
-      await loadRoomData(roomData.id)
+        setRoom(roomData)
 
-      if (active) {
+        let localParticipantId = localStorage.getItem(
+          getParticipantStorageKey(upperCode)
+        )
+
+        if (localParticipantId) {
+          const { data: existingParticipant } = await supabase
+            .from('participants')
+            .select('*')
+            .eq('id', localParticipantId)
+            .eq('room_id', roomData.id)
+            .maybeSingle()
+
+          if (!active) return
+
+          if (existingParticipant) {
+            setParticipantId(existingParticipant.id)
+            setDisplayName(existingParticipant.display_name)
+            setNameInput(existingParticipant.display_name)
+          } else {
+            localStorage.removeItem(getParticipantStorageKey(upperCode))
+            localParticipantId = null
+          }
+        }
+
+        if (!localParticipantId) {
+          const defaultName = `Hungry Friend ${Math.floor(
+            Math.random() * 900 + 100
+          )}`
+
+          const { data: newParticipant, error: participantError } = await supabase
+            .from('participants')
+            .insert({
+              room_id: roomData.id,
+              display_name: defaultName,
+            })
+            .select()
+            .single()
+
+          if (!active) return
+
+          if (participantError) {
+            setError(participantError.message)
+            setLoading(false)
+            return
+          }
+
+          localStorage.setItem(
+            getParticipantStorageKey(upperCode),
+            newParticipant.id
+          )
+          setParticipantId(newParticipant.id)
+          setDisplayName(newParticipant.display_name)
+          setNameInput(newParticipant.display_name)
+        }
+
+        await refreshRoomData(roomData.id)
+
+        if (active) {
+          setLoading(false)
+        }
+      } catch (err) {
+        if (!active) return
+        setError(err.message || 'Something went wrong.')
         setLoading(false)
       }
-    }
-
-    async function loadRoomData(roomId) {
-      const [{ data: participantRows }, { data: suggestionRows }, { data: voteRows }] = await Promise.all([
-        supabase.from('participants').select('*').eq('room_id', roomId).order('created_at', { ascending: true }),
-        supabase.from('suggestions').select('*').eq('room_id', roomId).order('created_at', { ascending: true }),
-        supabase.from('votes').select('*').eq('room_id', roomId),
-      ])
-
-      if (!active) return
-
-      setParticipants(participantRows || [])
-      setSuggestions(suggestionRows || [])
-      setVotes(voteRows || [])
     }
 
     bootstrapRoom()
@@ -235,18 +272,45 @@ function RoomPage() {
       .channel(`room-${room.id}`)
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'participants', filter: `room_id=eq.${room.id}` },
-        () => refreshRoomData(room.id)
+        {
+          event: '*',
+          schema: 'public',
+          table: 'participants',
+          filter: `room_id=eq.${room.id}`,
+        },
+        async () => {
+          try {
+            await refreshRoomData(room.id)
+          } catch {}
+        }
       )
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'suggestions', filter: `room_id=eq.${room.id}` },
-        () => refreshRoomData(room.id)
+        {
+          event: '*',
+          schema: 'public',
+          table: 'suggestions',
+          filter: `room_id=eq.${room.id}`,
+        },
+        async () => {
+          try {
+            await refreshRoomData(room.id)
+          } catch {}
+        }
       )
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'votes', filter: `room_id=eq.${room.id}` },
-        () => refreshRoomData(room.id)
+        {
+          event: '*',
+          schema: 'public',
+          table: 'votes',
+          filter: `room_id=eq.${room.id}`,
+        },
+        async () => {
+          try {
+            await refreshRoomData(room.id)
+          } catch {}
+        }
       )
       .subscribe()
 
@@ -257,8 +321,13 @@ function RoomPage() {
 
   useEffect(() => {
     if (!participantId) return
+
     if (skipHydrateRef.current) {
       skipHydrateRef.current = false
+      return
+    }
+
+    if (saveTimeoutRef.current || savingVotes) {
       return
     }
 
@@ -271,7 +340,7 @@ function RoomPage() {
 
     setDraftVotes(mine)
     latestDraftRef.current = mine
-  }, [votes, participantId])
+  }, [votes, participantId, savingVotes])
 
   useEffect(() => {
     return () => {
@@ -280,68 +349,6 @@ function RoomPage() {
       }
     }
   }, [])
-
-  async function refreshRoomData(roomId) {
-    const [{ data: participantRows }, { data: suggestionRows }, { data: voteRows }] = await Promise.all([
-      supabase.from('participants').select('*').eq('room_id', roomId).order('created_at', { ascending: true }),
-      supabase.from('suggestions').select('*').eq('room_id', roomId).order('created_at', { ascending: true }),
-      supabase.from('votes').select('*').eq('room_id', roomId),
-    ])
-
-    setParticipants(participantRows || [])
-    setSuggestions(suggestionRows || [])
-    setVotes(voteRows || [])
-  }
-
-  const myUsedPoints = useMemo(() => {
-    return Object.values(draftVotes).reduce((sum, value) => sum + value, 0)
-  }, [draftVotes])
-
-  const myRemainingPoints = 100 - myUsedPoints
-
-  const optimisticVotes = useMemo(() => {
-    if (!participantId) return votes
-
-    const others = votes.filter((vote) => vote.participant_id !== participantId)
-    const mine = Object.entries(draftVotes)
-      .filter(([, points]) => points > 0)
-      .map(([suggestionId, points]) => ({
-        room_id: room?.id,
-        participant_id: participantId,
-        suggestion_id: suggestionId,
-        points,
-      }))
-
-    return [...others, ...mine]
-  }, [votes, draftVotes, participantId, room?.id])
-
-  const totalsBySuggestion = useMemo(() => {
-    const map = {}
-    for (const suggestion of suggestions) {
-      map[suggestion.id] = 0
-    }
-    for (const vote of optimisticVotes) {
-      map[vote.suggestion_id] = (map[vote.suggestion_id] || 0) + vote.points
-    }
-    return map
-  }, [optimisticVotes, suggestions])
-
-  const sortedSuggestions = useMemo(() => {
-    return [...suggestions].sort((a, b) => {
-      const diff = (totalsBySuggestion[b.id] || 0) - (totalsBySuggestion[a.id] || 0)
-      if (diff !== 0) return diff
-      return a.created_at.localeCompare(b.created_at)
-    })
-  }, [suggestions, totalsBySuggestion])
-
-  const topThree = useMemo(() => {
-    return sortedSuggestions.slice(0, 3)
-  }, [sortedSuggestions])
-
-  const topMax = useMemo(() => {
-    if (topThree.length === 0) return 1
-    return Math.max(...topThree.map((item) => totalsBySuggestion[item.id] || 0), 1)
-  }, [topThree, totalsBySuggestion])
 
   async function handleSaveName(e) {
     e.preventDefault()
@@ -353,13 +360,13 @@ function RoomPage() {
     setSavingName(true)
     setError('')
 
-    const { error } = await supabase
+    const { error: updateError } = await supabase
       .from('participants')
       .update({ display_name: trimmed })
       .eq('id', participantId)
 
-    if (error) {
-      setError(error.message)
+    if (updateError) {
+      setError(updateError.message)
     } else {
       setDisplayName(trimmed)
     }
@@ -386,16 +393,14 @@ function RoomPage() {
     setAddingSuggestion(true)
     setError('')
 
-    const { error } = await supabase
-      .from('suggestions')
-      .insert({
-        room_id: room.id,
-        participant_id: participantId,
-        name: trimmed,
-      })
+    const { error: insertError } = await supabase.from('suggestions').insert({
+      room_id: room.id,
+      participant_id: participantId,
+      name: trimmed,
+    })
 
-    if (error) {
-      setError(error.message)
+    if (insertError) {
+      setError(insertError.message)
     } else {
       setSuggestionInput('')
     }
@@ -405,60 +410,39 @@ function RoomPage() {
 
   function scheduleVoteSave(nextDraft) {
     latestDraftRef.current = nextDraft
-
+  
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current)
     }
-
+  
     saveTimeoutRef.current = setTimeout(async () => {
       if (!room?.id || !participantId) return
-
-      const entries = Object.entries(latestDraftRef.current)
+  
       setSavingVotes(true)
-
+  
       try {
-        const mineInDb = votes.filter((vote) => vote.participant_id === participantId)
-        const dbMap = {}
-        for (const vote of mineInDb) {
-          dbMap[vote.suggestion_id] = vote
-        }
-
-        const toUpsert = entries
-          .filter(([, points]) => points > 0)
-          .map(([suggestionId, points]) => ({
-            room_id: room.id,
-            participant_id: participantId,
-            suggestion_id: suggestionId,
-            points,
-          }))
-
-        const toDeleteIds = mineInDb
-          .filter((vote) => !(latestDraftRef.current[vote.suggestion_id] > 0))
-          .map((vote) => vote.id)
-
-        if (toUpsert.length > 0) {
-          const { error: upsertError } = await supabase
-            .from('votes')
-            .upsert(toUpsert, { onConflict: 'participant_id,suggestion_id' })
-
-          if (upsertError) throw upsertError
-        }
-
-        if (toDeleteIds.length > 0) {
-          const { error: deleteError } = await supabase
-            .from('votes')
-            .delete()
-            .in('id', toDeleteIds)
-
-          if (deleteError) throw deleteError
-        }
-
+        const payload = suggestions.map((suggestion) => ({
+          room_id: room.id,
+          participant_id: participantId,
+          suggestion_id: suggestion.id,
+          points: latestDraftRef.current[suggestion.id] ?? 0,
+        }))
+  
+        const { error: upsertError } = await supabase
+          .from('votes')
+          .upsert(payload, {
+            onConflict: 'participant_id,suggestion_id',
+          })
+  
+        if (upsertError) throw upsertError
+  
         skipHydrateRef.current = true
         await refreshRoomData(room.id)
       } catch (err) {
         setError(err.message || 'Could not save votes.')
       } finally {
         setSavingVotes(false)
+        saveTimeoutRef.current = null
       }
     }, 220)
   }
@@ -467,24 +451,83 @@ function RoomPage() {
     const nextValue = Number(rawValue)
 
     setDraftVotes((prev) => {
-      const current = prev[suggestionId] || 0
-      const usedWithoutCurrent = Object.values(prev).reduce((sum, value) => sum + value, 0) - current
+      const current = prev[suggestionId] ?? 0
+      const usedWithoutCurrent =
+        Object.values(prev).reduce((sum, value) => sum + value, 0) - current
       const allowed = Math.max(0, 100 - usedWithoutCurrent)
-      const clamped = Math.min(nextValue, allowed)
+      const clamped = Math.max(0, Math.min(nextValue, allowed))
 
       const nextDraft = {
         ...prev,
         [suggestionId]: clamped,
       }
 
-      if (clamped === 0) {
-        delete nextDraft[suggestionId]
-      }
-
+      latestDraftRef.current = nextDraft
       scheduleVoteSave(nextDraft)
+
       return nextDraft
     })
   }
+
+  const myUsedPoints = useMemo(() => {
+    return Object.values(draftVotes).reduce((sum, value) => sum + value, 0)
+  }, [draftVotes])
+
+  const myRemainingPoints = 100 - myUsedPoints
+
+  const optimisticVotes = useMemo(() => {
+    if (!participantId) return votes
+
+    const others = votes.filter((vote) => vote.participant_id !== participantId)
+
+    const mine = Object.entries(draftVotes)
+      .filter(([, points]) => points > 0)
+      .map(([suggestionId, points]) => ({
+        room_id: room?.id,
+        participant_id: participantId,
+        suggestion_id: suggestionId,
+        points,
+      }))
+
+    return [...others, ...mine]
+  }, [votes, draftVotes, participantId, room?.id])
+
+  const totalsBySuggestion = useMemo(() => {
+    const map = {}
+
+    for (const suggestion of suggestions) {
+      map[suggestion.id] = 0
+    }
+
+    for (const vote of optimisticVotes) {
+      map[vote.suggestion_id] = (map[vote.suggestion_id] ?? 0) + vote.points
+    }
+
+    return map
+  }, [optimisticVotes, suggestions])
+
+  const displaySuggestions = useMemo(() => {
+    return [...suggestions].sort((a, b) =>
+      a.created_at.localeCompare(b.created_at)
+    )
+  }, [suggestions])
+
+  const sortedSuggestions = useMemo(() => {
+    return [...suggestions].sort((a, b) => {
+      const diff = (totalsBySuggestion[b.id] ?? 0) - (totalsBySuggestion[a.id] ?? 0)
+      if (diff !== 0) return diff
+      return a.created_at.localeCompare(b.created_at)
+    })
+  }, [suggestions, totalsBySuggestion])
+
+  const topThree = useMemo(() => {
+    return sortedSuggestions.slice(0, 3)
+  }, [sortedSuggestions])
+
+  const topMax = useMemo(() => {
+    if (topThree.length === 0) return 1
+    return Math.max(...topThree.map((item) => totalsBySuggestion[item.id] ?? 0), 1)
+  }, [topThree, totalsBySuggestion])
 
   if (loading) {
     return (
@@ -502,10 +545,12 @@ function RoomPage() {
       <div className="app-shell">
         <div className="card room-card">
           <div className="room-topbar">
-            <Link to="/" className="back-link">← Back</Link>
-            <span className="room-pill">Code: {upperCode}</span>
+            <Link to="/" className="back-link">
+              Back
+            </Link>
+            <span className="room-pill">Code {upperCode}</span>
           </div>
-          <h2>Couldn’t open room</h2>
+          <h2>Couldn't open room</h2>
           <p className="error-text">{error}</p>
         </div>
       </div>
@@ -518,8 +563,10 @@ function RoomPage() {
     <div className="app-shell">
       <div className="card room-card">
         <div className="room-topbar">
-          <Link to="/" className="back-link">← Back</Link>
-          <span className="room-pill">Code: {upperCode}</span>
+          <Link to="/" className="back-link">
+            Back
+          </Link>
+          <span className="room-pill">Code {upperCode}</span>
         </div>
 
         <div className="winner-banner">
@@ -527,10 +574,12 @@ function RoomPage() {
             <p className="eyebrow">Current leader</p>
             <h2>{leader ? leader.name : 'Waiting for suggestions'}</h2>
             <p className="subtext small">
-              {leader ? `${totalsBySuggestion[leader.id] || 0} total points so far.` : 'Add a place to get started.'}
+              {leader
+                ? `${totalsBySuggestion[leader.id] ?? 0} total points so far.`
+                : 'Add a place to get started.'}
             </p>
           </div>
-          <div className="sync-badge">{savingVotes ? 'Saving…' : 'Live'}</div>
+          <div className="sync-badge">{savingVotes ? 'Saving...' : 'Live'}</div>
         </div>
 
         <div className="room-grid">
@@ -554,7 +603,11 @@ function RoomPage() {
                   placeholder="Enter your display name"
                   maxLength={30}
                 />
-                <button className="btn btn-secondary" type="submit" disabled={savingName}>
+                <button
+                  className="btn btn-secondary"
+                  type="submit"
+                  disabled={savingName}
+                >
                   {savingName ? 'Saving...' : 'Save'}
                 </button>
               </div>
@@ -598,18 +651,21 @@ function RoomPage() {
                 </div>
               ) : (
                 topThree.map((item, index) => {
-                  const total = totalsBySuggestion[item.id] || 0
-                  const width = `${(total / topMax) * 100}%`
+                  const total = totalsBySuggestion[item.id] ?? 0
+                  const width = (total / topMax) * 100
 
                   return (
                     <div key={item.id} className="rank-row">
                       <div className="rank-head">
-                        <span className="rank-index">#{index + 1}</span>
+                        <span className="rank-index">{index + 1}</span>
                         <span className="rank-name">{item.name}</span>
                         <span className="rank-total">{total}</span>
                       </div>
                       <div className="rank-track">
-                        <div className="rank-fill" style={{ width }} />
+                        <div
+                          className="rank-fill"
+                          style={{ width: `${width}%` }}
+                        />
                       </div>
                     </div>
                   )
@@ -629,26 +685,32 @@ function RoomPage() {
                   onChange={(e) => setSuggestionInput(e.target.value)}
                   placeholder="e.g. Shake Shack, Sushiro, Din Tai Fung"
                 />
-                <button className="btn btn-primary" type="submit" disabled={addingSuggestion}>
+                <button
+                  className="btn btn-primary"
+                  type="submit"
+                  disabled={addingSuggestion}
+                >
                   {addingSuggestion ? 'Adding...' : 'Add'}
                 </button>
               </div>
             </form>
 
-            {error && error !== 'Room not found.' ? <p className="error-text">{error}</p> : null}
+            {error && error !== 'Room not found.' ? (
+              <p className="error-text">{error}</p>
+            ) : null}
 
             <div className="suggestion-list">
-              {sortedSuggestions.length === 0 ? (
+              {displaySuggestions.length === 0 ? (
                 <div className="empty-state">
                   <p>No places yet. Add the first suggestion.</p>
                 </div>
               ) : (
-                sortedSuggestions.map((item) => {
-                  const myPoints = draftVotes[item.id] || 0
-                  const totalPoints = totalsBySuggestion[item.id] || 0
+                displaySuggestions.map((item) => {
+                  const myPoints = draftVotes[item.id] ?? 0
+                  const totalPoints = totalsBySuggestion[item.id] ?? 0
                   const usedWithoutCurrent = myUsedPoints - myPoints
-                  const maxAllowed = 100 - usedWithoutCurrent
-                  const sliderPercent = `${myPoints}%`
+                  const maxAllowed = Math.max(0, 100 - usedWithoutCurrent)
+                  const sliderPercent = myPoints
 
                   return (
                     <div key={item.id} className="suggestion-card">
@@ -656,7 +718,7 @@ function RoomPage() {
                         <div className="suggestion-copy">
                           <h3>{item.name}</h3>
                           <p className="suggestion-meta">
-                            Total: {totalPoints} points · Yours: {myPoints}
+                            Total {totalPoints} points · Yours {myPoints}
                           </p>
                         </div>
                         <div className="pill-total">{totalPoints}</div>
@@ -665,22 +727,28 @@ function RoomPage() {
                       <div className="slider-block">
                         <div className="slider-labels">
                           <span>0</span>
-                          <span>Your points: {myPoints}</span>
-                          <span>{maxAllowed}</span>
+                          <span>Your points {myPoints}</span>
+                          <span>100</span>
                         </div>
 
                         <input
                           type="range"
                           min="0"
-                          max={maxAllowed}
+                          max="100"
                           step="1"
                           value={myPoints}
-                          onChange={(e) => handleSliderChange(item.id, e.target.value)}
+                          onChange={(e) =>
+                            handleSliderChange(item.id, e.target.value)
+                          }
                           className="vote-slider"
                           style={{
-                            background: `linear-gradient(to right, #0f6c70 0%, #0f6c70 ${sliderPercent}, #e8dfd5 ${sliderPercent}, #e8dfd5 100%)`,
+                            background: `linear-gradient(to right, #0f6c70 0%, #0f6c70 ${sliderPercent}%, #e8dfd5 ${sliderPercent}%, #e8dfd5 100%)`,
                           }}
                         />
+
+                        <p className="suggestion-meta">
+                          Max you can set now: {maxAllowed}
+                        </p>
                       </div>
                     </div>
                   )
