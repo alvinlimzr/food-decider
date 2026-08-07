@@ -113,3 +113,62 @@ body{-webkit-text-size-adjust:100%}
     order: 2;
   }
 }
+
+/* Append this to the end of your current CSS. Phone-only fixes. */
+
+@media screen and (max-width: 640px) {
+  .room-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  /* Center only the section titles */
+  .panel > .eyebrow,
+  .compact-panel > .eyebrow,
+  .panel-wide > .eyebrow,
+  .voting-title {
+    text-align: center;
+    width: 100%;
+    display: block;
+  }
+
+  /* Force each suggestion card into a top-to-bottom stack. */
+  .suggestion-card {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .suggestion-main {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .suggestion-copy {
+    width: 100%;
+  }
+
+  .suggestion-actions {
+    width: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    order: 3;
+    margin-top: 12px;
+  }
+
+  .suggestion-actions .btn-delete {
+    width: min(220px, 100%);
+    margin: 0 auto;
+  }
+
+  .slider-block {
+    order: 2;
+  }
+
+  .slider-labels {
+    justify-content: space-between;
+  }
+}
