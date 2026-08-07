@@ -19,3 +19,37 @@ body{-webkit-text-size-adjust:100%}
 .slider-block{margin-top:18px}.slider-labels{font-size:.8rem;gap:6px}.slider-labels span:nth-child(2){text-align:center}.vote-slider{height:12px}.vote-slider::-webkit-slider-runnable-track{height:12px}.vote-slider::-webkit-slider-thumb{width:28px;height:28px;margin-top:-8px}.vote-slider::-moz-range-track{height:12px}.vote-slider::-moz-range-thumb{width:28px;height:28px}
 .modal-backdrop{padding:16px}.modal-card{width:100%;padding:20px;border-radius:18px}.modal-actions{display:grid;grid-template-columns:1fr;gap:9px}
 }
+
+
+@media screen and (max-width: 640px) {
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100dvh;
+    min-height: 100dvh;
+    padding: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    overscroll-behavior: contain;
+    z-index: 9999;
+  }
+
+  .modal-card {
+    position: relative;
+    width: min(100%, 420px);
+    max-height: calc(100dvh - 32px);
+    overflow-y: auto;
+    margin: 0;
+    transform: none;
+  }
+
+  /* Prevent the document behind the modal from scrolling while it is open. */
+  body:has(.modal-backdrop) {
+    overflow: hidden;
+    position: fixed;
+    width: 100%;
+  }
+}
