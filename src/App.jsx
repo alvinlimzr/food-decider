@@ -77,8 +77,6 @@ function HomePage() {
   return (
     <Layout>
       <div className="app-shell"><div className="card hero-card app-title-card">
-        <p className="app-name">Let’s Decide</p>
-        <p className="eyebrow">Food Decider</p>
         <h1>Pick a place without the group chat chaos.</h1>
         <p className="subtext">Create a room, share the code, add options, and drag your 100 points toward what you actually want to eat.</p>
         <div className="actions"><button className="btn btn-primary" onClick={createRoom} disabled={busy}>{busy ? 'Creating...' : 'Create room'}</button></div>
@@ -141,7 +139,6 @@ function NamePage() {
     <Layout><div className="app-shell"><div className="card hero-card">
       <Link to="/" className="back-link">Back</Link>
       {error && !room ? <><h2>Couldn’t open room</h2><p className="error-text">{error}</p></> : <>
-        <p className="eyebrow">Join room</p>
         <h2>What should we call you?</h2>
         <p className="subtext small">Choose the name other people in this room will see.</p>
         <form className="stack-form" onSubmit={submit}><div className="join-row">
