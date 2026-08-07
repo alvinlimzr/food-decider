@@ -1,1396 +1,474 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Routes, Route, useNavigate, useParams, Link } from 'react-router-dom'
+import { Routes, Route, Link, useNavigate, useParams } from 'react-router-dom'
 import { supabase } from './supabase'
 
-const PARTICIPANT_COLORS = [
-  { solid: '#d85b66', soft: 'rgba(216, 91, 102, 0.18)' },
-  { solid: '#4f7cff', soft: 'rgba(79, 124, 255, 0.18)' },
-  { solid: '#31a27c', soft: 'rgba(49, 162, 124, 0.18)' },
-  { solid: '#d08a2f', soft: 'rgba(208, 138, 47, 0.18)' },
-  { solid: '#8a63d2', soft: 'rgba(138, 99, 210, 0.18)' },
-  { solid: '#d05fa8', soft: 'rgba(208, 95, 168, 0.18)' },
-  { solid: '#2f9db1', soft: 'rgba(47, 157, 177, 0.18)' },
-  { solid: '#7a9852', soft: 'rgba(122, 152, 82, 0.18)' },
+const COLORS = [
+  { solid: '#d85b66', soft: 'rgba(216,91,102,.18)' },
+  { solid: '#4f7cff', soft: 'rgba(79,124,255,.18)' },
+  { solid: '#31a27c', soft: 'rgba(49,162,124,.18)' },
+  { solid: '#d08a2f', soft: 'rgba(208,138,47,.18)' },
+  { solid: '#8a63d2', soft: 'rgba(138,99,210,.18)' },
+  { solid: '#d05fa8', soft: 'rgba(208,95,168,.18)' },
+  { solid: '#2f9db1', soft: 'rgba(47,157,177,.18)' },
+  { solid: '#7a9852', soft: 'rgba(122,152,82,.18)' },
 ]
 
-function generateRoomCode() {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
-  let code = ''
-
-  for (let i = 0; i < 6; i += 1) {
-    code += chars[Math.floor(Math.random() * chars.length)]
-  }
-
-  return code
-}
-
-function getParticipantStorageKey(roomCode) {
-  return `food-decider-participant-${roomCode}`
-}
-
-function truncateLabel(value, max = 50) {
+const participantKey = (code) => `food-decider-participant-${code}`
+const shorten = (value, max = 50) => {
   const text = String(value ?? '').trim()
-  if (text.length <= max) return text
-  return `${text.slice(0, max)}...`
+  return text.length <= max ? text : `${text.slice(0, max - 1)}...`
 }
 
-function roomLink(code) {
-  return `${window.location.origin}/room/${code}`
+function ThemeToggle() {
+  const [theme, setTheme] = useState(() => localStorage.getItem('food-decider-theme') || 'light')
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+    localStorage.setItem('food-decider-theme', theme)
+  }, [theme])
+
+  return (
+    <div className="theme-toggle" role="group" aria-label="Theme selection">
+      <button type="button" className={theme === 'light' ? 'theme-button active' : 'theme-button'} onClick={() => setTheme('light')}>☀ Light</button>
+      <button type="button" className={theme === 'dark' ? 'theme-button active' : 'theme-button'} onClick={() => setTheme('dark')}>☾ Dark</button>
+    </div>
+  )
+}
+
+function Layout({ children }) {
+  return <><ThemeToggle />{children}</>
+}
+
+function generateCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+  return Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join('')
 }
 
 function HomePage() {
   const navigate = useNavigate()
-  const [joinCode, setJoinCode] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [code, setCode] = useState('')
+  const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
-  async function handleCreateRoom() {
-    setLoading(true)
+  async function createRoom() {
+    setBusy(true)
     setError('')
-
     try {
-      let createdRoom = null
-      let attempts = 0
-
-      while (!createdRoom && attempts < 5) {
-        const code = generateRoomCode()
-        const { data, error: insertError } = await supabase
-          .from('rooms')
-          .insert({ code })
-          .select()
-          .single()
-
-        if (!insertError && data) {
-          createdRoom = data
-        }
-
-        attempts += 1
+      let room = null
+      for (let attempt = 0; attempt < 5 && !room; attempt += 1) {
+        const result = await supabase.from('rooms').insert({ code: generateCode() }).select().single()
+        if (!result.error) room = result.data
       }
-
-      if (!createdRoom) {
-        throw new Error('Could not create room. Please try again.')
-      }
-
-      navigate(`/room/${createdRoom.code}`)
+      if (!room) throw new Error('Could not create room.')
+      navigate(`/room/${room.code}`)
     } catch (err) {
       setError(err.message || 'Something went wrong.')
     } finally {
-      setLoading(false)
+      setBusy(false)
     }
   }
 
-  function handleJoinRoom(e) {
-    e.preventDefault()
-    const cleaned = joinCode.trim().toUpperCase()
-    if (!cleaned) return
-    navigate(`/room/${cleaned}`)
+  function joinRoom(event) {
+    event.preventDefault()
+    const cleaned = code.trim().toUpperCase()
+    if (cleaned) navigate(`/room/${cleaned}`)
   }
 
   return (
-    <div className="app-shell">
-      <div className="card hero-card">
+    <Layout>
+      <div className="app-shell"><div className="card hero-card app-title-card">
+        <p className="app-name">Let’s Decide</p>
         <p className="eyebrow">Food Decider</p>
         <h1>Pick a place without the group chat chaos.</h1>
-        <p className="subtext">
-          Create a room, share the code, add options, and drag your 100 points
-          toward what you actually want to eat.
-        </p>
-
-        <div className="actions">
-          <button
-            className="btn btn-primary"
-            onClick={handleCreateRoom}
-            disabled={loading}
-          >
-            {loading ? 'Creating...' : 'Create room'}
-          </button>
-        </div>
-
-        <form className="join-form" onSubmit={handleJoinRoom}>
-          <label className="field-label" htmlFor="join-code">
-            Join with room code
-          </label>
+        <p className="subtext">Create a room, share the code, add options, and drag your 100 points toward what you actually want to eat.</p>
+        <div className="actions"><button className="btn btn-primary" onClick={createRoom} disabled={busy}>{busy ? 'Creating...' : 'Create room'}</button></div>
+        <form className="join-form" onSubmit={joinRoom}>
           <div className="join-row">
-            <input
-              id="join-code"
-              className="input"
-              placeholder="Enter 6-character code"
-              value={joinCode}
-              onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
-              maxLength={6}
-            />
-            <button className="btn btn-secondary" type="submit">
-              Join
-            </button>
+            <input className="input" value={code} onChange={(event) => setCode(event.target.value.toUpperCase())} maxLength={6} placeholder="Join with room code" />
+            <button className="btn btn-secondary" type="submit">Join</button>
           </div>
         </form>
-
         {error ? <p className="error-text">{error}</p> : null}
-      </div>
-    </div>
+      </div></div>
+    </Layout>
+  )
+}
+
+function NamePage() {
+  const { code } = useParams()
+  const navigate = useNavigate()
+  const upper = code.toUpperCase()
+  const [room, setRoom] = useState(null)
+  const [name, setName] = useState('')
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(true)
+
+  useEffect(() => {
+    let active = true
+    supabase.from('rooms').select().eq('code', upper).maybeSingle().then(({ data, error: queryError }) => {
+      if (!active) return
+      if (queryError) setError(queryError.message)
+      else if (!data) setError('Room not found.')
+      else setRoom(data)
+      setBusy(false)
+    })
+    return () => { active = false }
+  }, [upper])
+
+  async function submit(event) {
+    event.preventDefault()
+    const trimmed = name.trim()
+    if (!trimmed || !room) return
+    setBusy(true)
+    setError('')
+    try {
+      const duplicate = await supabase.from('participants').select('id').eq('room_id', room.id).eq('display_name', trimmed).maybeSingle()
+      if (duplicate.error) throw duplicate.error
+      if (duplicate.data) throw new Error('That name is already taken.')
+      const result = await supabase.from('participants').insert({ room_id: room.id, display_name: trimmed }).select().single()
+      if (result.error) throw result.error
+      localStorage.setItem(participantKey(upper), result.data.id)
+      await supabase.from('messages').insert({ room_id: room.id, participant_id: result.data.id, type: 'system', body: '', meta: { kind: 'join', name: trimmed } })
+      navigate(`/room/${upper}`, { replace: true })
+    } catch (err) {
+      setError(err.message || 'Could not join room.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Layout><div className="app-shell"><div className="card hero-card">
+      <Link to="/" className="back-link">Back</Link>
+      {error && !room ? <><h2>Couldn’t open room</h2><p className="error-text">{error}</p></> : <>
+        <p className="eyebrow">Join room</p>
+        <h2>What should we call you?</h2>
+        <p className="subtext small">Choose the name other people in this room will see.</p>
+        <form className="stack-form" onSubmit={submit}><div className="join-row">
+          <input className="input" value={name} onChange={(event) => setName(event.target.value)} maxLength={60} placeholder="Your name" autoFocus />
+          <button className="btn btn-primary" disabled={busy} type="submit">{busy ? 'Joining...' : 'Join room'}</button>
+        </div></form>
+        {error ? <p className="error-text">{error}</p> : null}
+      </>}
+    </div></div></Layout>
   )
 }
 
 function RoomPage() {
-  const navigate = useNavigate()
   const { code } = useParams()
-  const upperCode = useMemo(() => code?.toUpperCase() ?? '', [code])
-
+  const navigate = useNavigate()
+  const upper = code.toUpperCase()
   const [room, setRoom] = useState(null)
-  const [participantId, setParticipantId] = useState('')
-  const [displayName, setDisplayName] = useState('')
-  const [nameInput, setNameInput] = useState('')
+  const [me, setMe] = useState(null)
   const [participants, setParticipants] = useState([])
   const [suggestions, setSuggestions] = useState([])
   const [votes, setVotes] = useState([])
-  const [draftVotes, setDraftVotes] = useState({})
+  const [draft, setDraft] = useState({})
   const [messages, setMessages] = useState([])
-  const [suggestionInput, setSuggestionInput] = useState('')
-  const [chatInput, setChatInput] = useState('')
-  const [loading, setLoading] = useState(true)
-  const [savingName, setSavingName] = useState(false)
-  const [addingSuggestion, setAddingSuggestion] = useState(false)
-  const [deletingSuggestionId, setDeletingSuggestionId] = useState('')
-  const [savingVotes, setSavingVotes] = useState(false)
-  const [copyMessage, setCopyMessage] = useState('')
+  const [suggestion, setSuggestion] = useState('')
+  const [chat, setChat] = useState('')
   const [error, setError] = useState('')
-  const [removedModalOpen, setRemovedModalOpen] = useState(false)
-  const [removedModalMessage, setRemovedModalMessage] = useState(
-    'You have been removed from this session.'
-  )
-  const [chatPinnedToBottom, setChatPinnedToBottom] = useState(true)
+  const [loading, setLoading] = useState(true)
+  const [removed, setRemoved] = useState(false)
+  const [kickTarget, setKickTarget] = useState(null)
+  const [kicking, setKicking] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [copyMessage, setCopyMessage] = useState('')
+  const chatRef = useRef(null)
+  const saveTimer = useRef(null)
+  const removalTimer = useRef(null)
 
-  const saveTimeoutRef = useRef(null)
-  const latestDraftRef = useRef({})
-  const skipHydrateRef = useRef(false)
-  const copyTimerRef = useRef(null)
-  const redirectTimerRef = useRef(null)
-  const removeAlertNonceRef = useRef(0)
-  const chatLogRef = useRef(null)
-  const chatBottomRef = useRef(null)
-  const removedRef = useRef(false)
-
-  async function refreshRoomData(roomId) {
-    const [
-      { data: participantRows, error: participantsError },
-      { data: suggestionRows, error: suggestionsError },
-      { data: voteRows, error: votesError },
-      { data: messageRows, error: messagesError },
-    ] = await Promise.all([
-      supabase
-        .from('participants')
-        .select('*')
-        .eq('room_id', roomId)
-        .order('created_at', { ascending: true }),
-      supabase
-        .from('suggestions')
-        .select('*')
-        .eq('room_id', roomId)
-        .order('created_at', { ascending: true }),
-      supabase
-        .from('votes')
-        .select('*')
-        .eq('room_id', roomId),
-      supabase
-        .from('messages')
-        .select('*')
-        .eq('room_id', roomId)
-        .order('created_at', { ascending: true })
-        .limit(80),
+  async function refresh(roomId) {
+    const [participantsResult, suggestionsResult, votesResult, messagesResult] = await Promise.all([
+      supabase.from('participants').select().eq('room_id', roomId).order('created_at'),
+      supabase.from('suggestions').select().eq('room_id', roomId).order('created_at'),
+      supabase.from('votes').select().eq('room_id', roomId),
+      supabase.from('messages').select().eq('room_id', roomId).order('created_at').limit(80),
     ])
-
-    if (participantsError) throw participantsError
-    if (suggestionsError) throw suggestionsError
-    if (votesError) throw votesError
-    if (messagesError) throw messagesError
-
-    setParticipants(participantRows ?? [])
-    setSuggestions(suggestionRows ?? [])
-    setVotes(voteRows ?? [])
-    setMessages(messageRows ?? [])
+    if (participantsResult.error) throw participantsResult.error
+    if (suggestionsResult.error) throw suggestionsResult.error
+    if (votesResult.error) throw votesResult.error
+    if (messagesResult.error) throw messagesResult.error
+    setParticipants(participantsResult.data || [])
+    setSuggestions(suggestionsResult.data || [])
+    setVotes(votesResult.data || [])
+    setMessages(messagesResult.data || [])
   }
 
-  function handleReturnHome() {
-    if (redirectTimerRef.current) clearTimeout(redirectTimerRef.current)
-    navigate('/', { replace: true })
+  function showRemoved() {
+    setRemoved(true)
+    localStorage.removeItem(participantKey(upper))
+    clearTimeout(removalTimer.current)
+    removalTimer.current = window.setTimeout(() => navigate('/', { replace: true }), 5000)
   }
-
-  function handleRemovedFromSession() {
-    const nonce = Date.now()
-    removeAlertNonceRef.current = nonce
-    removedRef.current = true
-
-    setRemovedModalMessage('You have been removed from this session.')
-    setRemovedModalOpen(true)
-
-    localStorage.removeItem(getParticipantStorageKey(upperCode))
-    setParticipantId('')
-    setDisplayName('')
-    setNameInput('')
-    setDraftVotes({})
-    latestDraftRef.current = {}
-    setVotes([])
-    setSuggestions([])
-    setParticipants([])
-    setSavingVotes(false)
-    setLoading(false)
-
-    if (redirectTimerRef.current) clearTimeout(redirectTimerRef.current)
-    redirectTimerRef.current = setTimeout(() => {
-      if (removeAlertNonceRef.current !== nonce) return
-      navigate('/', { replace: true })
-    }, 8000)
-  }
-
-  function handleChatScroll() {
-    const el = chatLogRef.current
-    if (!el) return
-
-    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
-    setChatPinnedToBottom(distanceFromBottom < 40)
-  }
-
-  useEffect(() => {
-    const el = chatLogRef.current
-    if (!el || !chatPinnedToBottom) return
-    el.scrollTop = el.scrollHeight
-  }, [messages, chatPinnedToBottom])
 
   useEffect(() => {
     let active = true
 
-    async function bootstrapRoom() {
-      setLoading(true)
-      setError('')
-
+    async function boot() {
       try {
-        const { data: roomData, error: roomError } = await supabase
-          .from('rooms')
-          .select('*')
-          .eq('code', upperCode)
-          .maybeSingle()
+        const roomResult = await supabase.from('rooms').select().eq('code', upper).maybeSingle()
+        if (roomResult.error) throw roomResult.error
+        if (!roomResult.data) throw new Error('Room not found.')
+        if (!active) return
 
-        if (!active || removedRef.current) return
-
-        if (roomError) {
-          setError(roomError.message)
-          setLoading(false)
+        setRoom(roomResult.data)
+        const storedId = localStorage.getItem(participantKey(upper))
+        if (!storedId) {
+          navigate(`/room/${upper}/name`, { replace: true })
           return
         }
 
-        if (!roomData) {
-          setError('Room not found.')
-          setLoading(false)
+        const participantResult = await supabase.from('participants').select().eq('id', storedId).eq('room_id', roomResult.data.id).maybeSingle()
+        if (!participantResult.data) {
+          localStorage.removeItem(participantKey(upper))
+          navigate(`/room/${upper}/name`, { replace: true })
           return
         }
 
-        setRoom(roomData)
-
-        let localParticipantId = localStorage.getItem(
-          getParticipantStorageKey(upperCode)
-        )
-
-        if (localParticipantId) {
-          const { data: existingParticipant } = await supabase
-            .from('participants')
-            .select('*')
-            .eq('id', localParticipantId)
-            .eq('room_id', roomData.id)
-            .maybeSingle()
-
-          if (!active || removedRef.current) return
-
-          if (existingParticipant) {
-            setParticipantId(existingParticipant.id)
-            setDisplayName(existingParticipant.display_name)
-            setNameInput(existingParticipant.display_name)
-          } else {
-            localStorage.removeItem(getParticipantStorageKey(upperCode))
-            localParticipantId = null
-          }
-        }
-
-        if (!localParticipantId && !removedRef.current) {
-          const defaultName = `Hungry Friend ${Math.floor(Math.random() * 900 + 100)}`
-
-          const { data: newParticipant, error: participantError } = await supabase
-            .from('participants')
-            .insert({
-              room_id: roomData.id,
-              display_name: defaultName,
-            })
-            .select()
-            .single()
-
-          if (!active || removedRef.current) return
-
-          if (participantError) {
-            setError(participantError.message)
-            setLoading(false)
-            return
-          }
-
-          localStorage.setItem(
-            getParticipantStorageKey(upperCode),
-            newParticipant.id
-          )
-          setParticipantId(newParticipant.id)
-          setDisplayName(newParticipant.display_name)
-          setNameInput(newParticipant.display_name)
-
-          await supabase.from('messages').insert({
-            room_id: roomData.id,
-            participant_id: newParticipant.id,
-            type: 'system',
-            body: '',
-            meta: {
-              kind: 'join',
-              name: newParticipant.display_name,
-            },
-          })
-        }
-
-        await refreshRoomData(roomData.id)
-
-        if (active && !removedRef.current) setLoading(false)
+        setMe(participantResult.data)
+        await refresh(roomResult.data.id)
       } catch (err) {
-        if (!active || removedRef.current) return
-        setError(err.message || 'Something went wrong.')
-        setLoading(false)
+        if (active) setError(err.message || 'Could not open room.')
+      } finally {
+        if (active) setLoading(false)
       }
     }
 
-    bootstrapRoom()
-
-    return () => {
-      active = false
-    }
-  }, [upperCode])
+    boot()
+    return () => { active = false }
+  }, [upper, navigate])
 
   useEffect(() => {
-    if (!room?.id || removedRef.current) return
+    if (!room?.id) return undefined
 
-    const channel = supabase
-      .channel(`room-${room.id}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'participants',
-          filter: `room_id=eq.${room.id}`,
-        },
-        async (payload) => {
-          try {
-            if (removedRef.current) return
-
-            if (payload.eventType === 'DELETE') {
-              const deletedId = payload.old?.id
-              if (!deletedId) return
-
-              setParticipants((prev) => prev.filter((item) => item.id !== deletedId))
-              setVotes((prev) => prev.filter((vote) => vote.participant_id !== deletedId))
-
-              if (deletedId === participantId) {
-                handleRemovedFromSession()
-              }
-              return
-            }
-
-            const changed = payload.new
-            if (!changed) return
-
-            setParticipants((prev) => {
-              const others = prev.filter((item) => item.id !== changed.id)
-              const next = [...others, changed]
-              next.sort((a, b) => a.created_at.localeCompare(b.created_at))
-              return next
-            })
-          } catch {}
+    const channel = supabase.channel(`room-${room.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'participants', filter: `room_id=eq.${room.id}` }, (payload) => {
+        if (payload.eventType === 'DELETE') {
+          setParticipants((current) => current.filter((item) => item.id !== payload.old?.id))
+          setVotes((current) => current.filter((vote) => vote.participant_id !== payload.old?.id))
+          if (payload.old?.id === me?.id) showRemoved()
+        } else if (payload.new) {
+          setParticipants((current) => [...current.filter((item) => item.id !== payload.new.id), payload.new])
         }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'kicks',
-          filter: `room_id=eq.${room.id}`,
-        },
-        async (payload) => {
-          try {
-            if (removedRef.current) return
+      })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'kicks', filter: `room_id=eq.${room.id}` }, (payload) => {
+        const kickedParticipantId = payload.new?.participant_id
+        if (!kickedParticipantId) return
 
-            const kickedParticipantId = payload.new?.participant_id
-            if (!kickedParticipantId) return
+        // Update every connected user's page immediately when a kick is created.
+        setParticipants((current) => current.filter((participant) => participant.id !== kickedParticipantId))
+        setVotes((current) => current.filter((vote) => vote.participant_id !== kickedParticipantId))
 
-            if (kickedParticipantId === participantId) {
-              handleRemovedFromSession()
-              await supabase.from('kicks').delete().eq('id', payload.new.id)
-            }
-          } catch {}
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'messages',
-          filter: `room_id=eq.${room.id}`,
-        },
-        async (payload) => {
-          try {
-            if (removedRef.current) return
-            const next = payload.new
-            if (!next) return
-            setMessages((prev) => [...prev, next].slice(-80))
-          } catch {}
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'suggestions',
-          filter: `room_id=eq.${room.id}`,
-        },
-        async (payload) => {
-          try {
-            if (removedRef.current) return
-            const next = payload.new
-            if (!next) return
-
-            setSuggestions((prev) => {
-              const others = prev.filter((item) => item.id !== next.id)
-              const merged = [...others, next]
-              merged.sort((a, b) => a.created_at.localeCompare(b.created_at))
-              return merged
-            })
-          } catch {}
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'DELETE',
-          schema: 'public',
-          table: 'suggestions',
-        },
-        async (payload) => {
-          try {
-            if (removedRef.current) return
-            const deletedId = payload.old?.id
-            if (!deletedId) return
-
-            setSuggestions((prev) => prev.filter((item) => item.id !== deletedId))
-            setVotes((prev) => prev.filter((vote) => vote.suggestion_id !== deletedId))
-            setDraftVotes((prev) => {
-              const next = { ...prev }
-              delete next[deletedId]
-              latestDraftRef.current = next
-              return next
-            })
-          } catch {}
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'votes',
-          filter: `room_id=eq.${room.id}`,
-        },
-        async () => {
-          try {
-            if (removedRef.current) return
-            await refreshRoomData(room.id)
-          } catch {}
-        }
-      )
+        if (kickedParticipantId === me?.id) showRemoved()
+      })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `room_id=eq.${room.id}` }, (payload) => setMessages((current) => [...current, payload.new].slice(-80)))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'votes', filter: `room_id=eq.${room.id}` }, () => refresh(room.id).catch(() => {}))
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'suggestions', filter: `room_id=eq.${room.id}` }, (payload) => setSuggestions((current) => [...current.filter((item) => item.id !== payload.new.id), payload.new]))
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'suggestions' }, (payload) => {
+        setSuggestions((current) => current.filter((item) => item.id !== payload.old?.id))
+        setVotes((current) => current.filter((vote) => vote.suggestion_id !== payload.old?.id))
+      })
       .subscribe()
 
     return () => {
       supabase.removeChannel(channel)
+      clearTimeout(removalTimer.current)
+      clearTimeout(saveTimer.current)
     }
-  }, [room?.id, participantId])
+  }, [room?.id, me?.id, upper, navigate])
 
   useEffect(() => {
-    if (!participantId || removedRef.current) return
+    if (chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight
+  }, [messages])
 
-    if (skipHydrateRef.current) {
-      skipHydrateRef.current = false
-      return
-    }
+  const colored = useMemo(() => participants.map((person, index) => ({ ...person, color: COLORS[index % COLORS.length] })), [participants])
+  const meColor = colored.find((person) => person.id === me?.id)?.color || COLORS[0]
+  const used = Object.values(draft).reduce((sum, value) => sum + value, 0)
+  const optimistic = useMemo(() => [...votes.filter((vote) => vote.participant_id !== me?.id), ...suggestions.map((item) => ({ participant_id: me?.id, suggestion_id: item.id, points: draft[item.id] || 0 }))], [votes, me?.id, suggestions, draft])
+  const totals = useMemo(() => {
+    const result = {}
+    suggestions.forEach((item) => { result[item.id] = 0 })
+    optimistic.forEach((vote) => { result[vote.suggestion_id] = (result[vote.suggestion_id] || 0) + vote.points })
+    return result
+  }, [suggestions, optimistic])
+  const sorted = useMemo(() => [...suggestions].sort((a, b) => (totals[b.id] || 0) - (totals[a.id] || 0) || a.created_at.localeCompare(b.created_at)), [suggestions, totals])
+  const top = sorted.slice(0, 3)
+  const maxTotal = Math.max(1, ...top.map((item) => totals[item.id] || 0))
+  const pointsLeft = colored.map((person) => {
+    const spent = optimistic.filter((vote) => vote.participant_id === person.id).reduce((sum, vote) => sum + vote.points, 0)
+    return { ...person, left: Math.max(0, 100 - spent) }
+  })
 
-    if (saveTimeoutRef.current || savingVotes) return
-
-    const mine = {}
-    for (const vote of votes) {
-      if (vote.participant_id === participantId) {
-        mine[vote.suggestion_id] = vote.points
-      }
-    }
-
-    setDraftVotes(mine)
-    latestDraftRef.current = mine
-  }, [votes, participantId, savingVotes])
-
-  useEffect(() => {
-    return () => {
-      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current)
-      if (copyTimerRef.current) clearTimeout(copyTimerRef.current)
-      if (redirectTimerRef.current) clearTimeout(redirectTimerRef.current)
-    }
-  }, [])
-
-  async function handleSaveName(e) {
-    e.preventDefault()
-    if (!participantId || removedRef.current) return
-
-    const trimmed = nameInput.trim()
-    if (!trimmed) return
-
-    setSavingName(true)
-    setError('')
-
-    const oldName = displayName || 'Hungry Friend'
-
-    const { error: updateError } = await supabase
-      .from('participants')
-      .update({ display_name: trimmed })
-      .eq('id', participantId)
-
-    if (updateError) {
-      setError(updateError.message)
-    } else {
-      setDisplayName(trimmed)
-
-      await supabase.from('messages').insert({
-        room_id: room.id,
-        participant_id: participantId || null,
-        type: 'system',
-        body: '',
-        meta: {
-          kind: 'rename',
-          oldName,
-          newName: trimmed,
-        },
-      })
-    }
-
-    setSavingName(false)
-  }
-
-  async function handleAddSuggestion(e) {
-    e.preventDefault()
-    if (!room?.id || !participantId || removedRef.current) return
-
-    const trimmed = suggestionInput.trim()
-    if (!trimmed) return
-
-    if (trimmed.length > 100) {
-      setError('Place name must be 100 characters or fewer.')
-      return
-    }
-
-    const alreadyExists = suggestions.some(
-      (item) => item.name.trim().toLowerCase() === trimmed.toLowerCase()
-    )
-
-    if (alreadyExists) {
-      setError('That place is already in the list.')
-      return
-    }
-
-    setAddingSuggestion(true)
-    setError('')
-
-    const { error: insertError } = await supabase.from('suggestions').insert({
-      room_id: room.id,
-      participant_id: participantId,
-      name: trimmed,
-    })
-
-    if (insertError) {
-      setError(insertError.message)
-    } else {
-      setSuggestionInput('')
-
-      await supabase.from('messages').insert({
-        room_id: room.id,
-        participant_id: participantId || null,
-        type: 'system',
-        body: '',
-        meta: {
-          kind: 'suggestion-added',
-          actor: displayName || 'Someone',
-          venue: trimmed,
-        },
-      })
-    }
-
-    setAddingSuggestion(false)
-  }
-
-  async function handleDeleteSuggestion(suggestionId) {
-    if (!room?.id || removedRef.current) return
-
-    setDeletingSuggestionId(suggestionId)
-    setError('')
-
-    const previousSuggestions = suggestions
-    const previousVotes = votes
-    const previousDraftVotes = draftVotes
-
-    setSuggestions((prev) => prev.filter((item) => item.id !== suggestionId))
-    setVotes((prev) => prev.filter((vote) => vote.suggestion_id !== suggestionId))
-    setDraftVotes((prev) => {
-      const next = { ...prev }
-      delete next[suggestionId]
-      latestDraftRef.current = next
+  function changeVote(id, rawValue) {
+    setDraft((current) => {
+      const previous = current[id] || 0
+      const allowed = Math.max(0, 100 - used + previous)
+      const next = { ...current, [id]: Math.min(Number(rawValue), allowed) }
+      clearTimeout(saveTimer.current)
+      saveTimer.current = window.setTimeout(async () => {
+        if (!room?.id || !me?.id || removed) return
+        setSaving(true)
+        const result = await supabase.from('votes').upsert(suggestions.map((item) => ({ room_id: room.id, participant_id: me.id, suggestion_id: item.id, points: next[item.id] || 0 })), { onConflict: 'participant_id,suggestion_id' })
+        if (result.error) setError(result.error.message)
+        else await refresh(room.id)
+        setSaving(false)
+      }, 220)
       return next
     })
+  }
 
-    try {
-      const deletedSuggestion = previousSuggestions.find((item) => item.id === suggestionId)
+  async function confirmKick() {
+    if (!kickTarget || !room?.id || !me?.id) return
 
-      const { error: deleteError } = await supabase
-        .from('suggestions')
-        .delete()
-        .eq('id', suggestionId)
-        .select()
+    const target = kickTarget
+    setKicking(true)
+    setError('')
 
-      if (deleteError) throw deleteError
+    const kickResult = await supabase.from('kicks').insert({ room_id: room.id, participant_id: target.id })
 
-      if (deletedSuggestion) {
+    if (kickResult.error) {
+      setError(kickResult.error.message)
+    } else {
+      // Optimistic update: remove the target immediately on the kicker's page.
+      setParticipants((current) => current.filter((participant) => participant.id !== target.id))
+      setVotes((current) => current.filter((vote) => vote.participant_id !== target.id))
+
+      const deleteResult = await supabase.from('participants').delete().eq('id', target.id).eq('room_id', room.id)
+
+      if (deleteResult.error) {
+        setError(deleteResult.error.message)
+        await refresh(room.id)
+      } else {
         await supabase.from('messages').insert({
           room_id: room.id,
-          participant_id: participantId || null,
+          participant_id: me.id,
           type: 'system',
           body: '',
-          meta: {
-            kind: 'suggestion-removed',
-            actor: displayName || 'Someone',
-            venue: deletedSuggestion.name,
-          },
+          meta: { kind: 'participant-removed', actor: me.display_name, target: target.display_name },
         })
       }
-    } catch (err) {
-      setSuggestions(previousSuggestions)
-      setVotes(previousVotes)
-      setDraftVotes(previousDraftVotes)
-      latestDraftRef.current = previousDraftVotes
-      setError(err.message || 'Could not delete place.')
-    } finally {
-      setDeletingSuggestionId('')
+    }
+
+    setKicking(false)
+    setKickTarget(null)
+  }
+
+  async function addSuggestion(event) {
+    event.preventDefault()
+    const name = suggestion.trim()
+    if (!name || !me) return
+    if (name.length > 100) return setError('Suggestion must be 100 characters or fewer.')
+
+    const result = await supabase.from('suggestions').insert({ room_id: room.id, participant_id: me.id, name })
+    if (result.error) setError(result.error.message)
+    else {
+      setSuggestion('')
+      await supabase.from('messages').insert({ room_id: room.id, participant_id: me.id, type: 'system', body: '', meta: { kind: 'suggestion-added', actor: me.display_name, venue: name } })
     }
   }
 
-  async function handleRemoveParticipant(participant) {
-    if (!room?.id || removedRef.current) return
-    if (!participant?.id) return
-    if (participant.id === participantId) return
-
-    const ok = window.confirm(`Remove ${participant.display_name}?`)
-    if (!ok) return
-
-    const previousParticipants = participants
-    const previousVotes = votes
-
-    setParticipants((prev) => prev.filter((item) => item.id !== participant.id))
-    setVotes((prev) => prev.filter((vote) => vote.participant_id !== participant.id))
-
-    try {
-      const { error: kickInsertError } = await supabase.from('kicks').insert({
-        room_id: room.id,
-        participant_id: participant.id,
-      })
-
-      if (kickInsertError) throw kickInsertError
-
-      const { error: deleteVotesError } = await supabase
-        .from('votes')
-        .delete()
-        .eq('room_id', room.id)
-        .eq('participant_id', participant.id)
-
-      if (deleteVotesError) throw deleteVotesError
-
-      const { error: deleteParticipantError } = await supabase
-        .from('participants')
-        .delete()
-        .eq('id', participant.id)
-
-      if (deleteParticipantError) throw deleteParticipantError
-
-      await supabase.from('messages').insert({
-        room_id: room.id,
-        participant_id: participantId || null,
-        type: 'system',
-        body: '',
-        meta: {
-          kind: 'participant-removed',
-          actor: displayName || 'Someone',
-          target: participant.display_name,
-        },
-      })
-    } catch (err) {
-      setParticipants(previousParticipants)
-      setVotes(previousVotes)
-      setError(err.message || 'Could not remove user.')
-    }
+  async function deleteSuggestion(item) {
+    const result = await supabase.from('suggestions').delete().eq('id', item.id)
+    if (result.error) setError(result.error.message)
+    else await supabase.from('messages').insert({ room_id: room.id, participant_id: me.id, type: 'system', body: '', meta: { kind: 'suggestion-removed', actor: me.display_name, venue: item.name } })
   }
 
-  async function handleCopyLink() {
-    try {
-      await navigator.clipboard.writeText(roomLink(upperCode))
-      setCopyMessage('Link copied')
-      if (copyTimerRef.current) clearTimeout(copyTimerRef.current)
-      copyTimerRef.current = setTimeout(() => setCopyMessage(''), 1400)
-    } catch {
-      setCopyMessage('Copy failed')
-      if (copyTimerRef.current) clearTimeout(copyTimerRef.current)
-      copyTimerRef.current = setTimeout(() => setCopyMessage(''), 1400)
-    }
+  async function sendChat(event) {
+    event.preventDefault()
+    const body = chat.trim()
+    if (!body) return
+    setChat('')
+    await supabase.from('messages').insert({ room_id: room.id, participant_id: me.id, type: 'chat', body, meta: { display_name: me.display_name, participant_id: me.id } })
   }
 
-  async function handleSendChat(e) {
-    e.preventDefault()
-    if (!room?.id || !chatInput.trim() || removedRef.current) return
+  function renderMessage(item) {
+    const meta = item.meta || {}
+    const color = colored.find((person) => person.id === (item.participant_id || meta.participant_id))?.color?.solid
+    const style = color ? { borderLeft: `3px solid ${color}` } : undefined
 
-    const text = chatInput.trim()
-    setChatInput('')
-
-    await supabase.from('messages').insert({
-      room_id: room.id,
-      participant_id: participantId || null,
-      type: 'chat',
-      body: text,
-      meta: {
-        display_name: displayName || 'Hungry Friend',
-      },
-    })
+    if (item.type === 'chat') return <div style={style}><span className="chat-name" style={color ? { color } : undefined}>{meta.display_name}:</span> <span className="chat-body">{item.body}</span></div>
+    if (meta.kind === 'join') return <div style={style}><span className="chat-body"><strong>{meta.name}</strong> joined</span></div>
+    if (meta.kind === 'participant-removed') return <div style={style}><span className="chat-body"><strong>{meta.actor}</strong> kicked <strong>{meta.target}</strong></span></div>
+    if (meta.kind === 'suggestion-added') return <div style={style}><span className="chat-body"><strong>{meta.actor}</strong> added <strong>{meta.venue}</strong></span></div>
+    if (meta.kind === 'suggestion-removed') return <div style={style}><span className="chat-body"><strong>{meta.actor}</strong> removed <strong>{meta.venue}</strong></span></div>
+    return <div style={style}><span className="chat-body">{item.body}</span></div>
   }
 
-  function scheduleVoteSave(nextDraft) {
-    latestDraftRef.current = nextDraft
-
-    if (saveTimeoutRef.current) {
-      clearTimeout(saveTimeoutRef.current)
-    }
-
-    saveTimeoutRef.current = setTimeout(async () => {
-      if (!room?.id || !participantId || removedRef.current) return
-
-      setSavingVotes(true)
-
-      try {
-        const payload = suggestions.map((suggestion) => ({
-          room_id: room.id,
-          participant_id: participantId,
-          suggestion_id: suggestion.id,
-          points: latestDraftRef.current[suggestion.id] ?? 0,
-        }))
-
-        const { error: upsertError } = await supabase
-          .from('votes')
-          .upsert(payload, {
-            onConflict: 'participant_id,suggestion_id',
-          })
-
-        if (upsertError) throw upsertError
-
-        skipHydrateRef.current = true
-
-        const { data: voteRows, error: votesError } = await supabase
-          .from('votes')
-          .select('*')
-          .eq('room_id', room.id)
-
-        if (votesError) throw votesError
-
-        setVotes(voteRows ?? [])
-      } catch (err) {
-        setError(err.message || 'Could not save votes.')
-      } finally {
-        setSavingVotes(false)
-        saveTimeoutRef.current = null
-      }
-    }, 220)
+  async function copyLink() {
+    await navigator.clipboard.writeText(`${window.location.origin}/room/${upper}`)
+    setCopyMessage('Link Copied')
+    window.setTimeout(() => setCopyMessage(''), 1400)
   }
 
-  function handleSliderChange(suggestionId, rawValue) {
-    const nextValue = Number(rawValue)
-
-    setDraftVotes((prev) => {
-      const current = prev[suggestionId] ?? 0
-      const usedWithoutCurrent =
-        Object.values(prev).reduce((sum, value) => sum + value, 0) - current
-      const allowed = Math.max(0, 100 - usedWithoutCurrent)
-      const clamped = Math.max(0, Math.min(nextValue, allowed))
-
-      const nextDraft = {
-        ...prev,
-        [suggestionId]: clamped,
-      }
-
-      latestDraftRef.current = nextDraft
-      scheduleVoteSave(nextDraft)
-
-      return nextDraft
-    })
-  }
-
-  function renderMessageContent(message) {
-    const meta = message.meta || {}
-
-    if (message.type === 'chat') {
-      return (
-        <>
-          <span className="chat-name">{meta.display_name || 'Hungry Friend'}</span>
-          <span className="chat-body">{message.body}</span>
-        </>
-      )
-    }
-
-    if (meta.kind === 'rename') {
-      return (
-        <span className="chat-body">
-          <strong>{meta.oldName}</strong> renamed themselves to <strong>{meta.newName}</strong>
-        </span>
-      )
-    }
-
-    if (meta.kind === 'join') {
-      return (
-        <span className="chat-body">
-          <strong>{meta.name}</strong> joined
-        </span>
-      )
-    }
-
-    if (meta.kind === 'participant-removed') {
-      return (
-        <span className="chat-body">
-          <strong>{meta.actor}</strong> removed <strong>{meta.target}</strong>
-        </span>
-      )
-    }
-
-    if (meta.kind === 'suggestion-added') {
-      return (
-        <span className="chat-body">
-          <strong>{meta.actor}</strong> added <strong>{meta.venue}</strong>
-        </span>
-      )
-    }
-
-    if (meta.kind === 'suggestion-removed') {
-      return (
-        <span className="chat-body">
-          <strong>{meta.actor}</strong> removed <strong>{meta.venue}</strong>
-        </span>
-      )
-    }
-
-    return <span className="chat-body">{message.body}</span>
-  }
-
-  const participantsWithColors = useMemo(() => {
-    return participants.map((participant, index) => ({
-      ...participant,
-      color: PARTICIPANT_COLORS[index % PARTICIPANT_COLORS.length],
-      orderIndex: index,
-    }))
-  }, [participants])
-
-  const myUsedPoints = useMemo(() => {
-    return Object.values(draftVotes).reduce((sum, value) => sum + value, 0)
-  }, [draftVotes])
-
-  const myRemainingPoints = 100 - myUsedPoints
-
-  const optimisticVotes = useMemo(() => {
-    if (!participantId) return votes
-
-    const others = votes.filter((vote) => vote.participant_id !== participantId)
-
-    const mine = suggestions.map((suggestion) => ({
-      room_id: room?.id,
-      participant_id: participantId,
-      suggestion_id: suggestion.id,
-      points: draftVotes[suggestion.id] ?? 0,
-    }))
-
-    return [...others, ...mine]
-  }, [votes, draftVotes, participantId, room?.id, suggestions])
-
-  const totalsBySuggestion = useMemo(() => {
-    const map = {}
-
-    for (const suggestion of suggestions) {
-      map[suggestion.id] = 0
-    }
-
-    for (const vote of optimisticVotes) {
-      map[vote.suggestion_id] = (map[vote.suggestion_id] ?? 0) + vote.points
-    }
-
-    return map
-  }, [optimisticVotes, suggestions])
-
-  const voteBreakdownBySuggestion = useMemo(() => {
-    const map = {}
-
-    for (const suggestion of suggestions) {
-      map[suggestion.id] = participantsWithColors.map((participant) => ({
-        participantId: participant.id,
-        displayName: participant.display_name,
-        points: 0,
-        color: participant.color,
-        orderIndex: participant.orderIndex,
-      }))
-    }
-
-    for (const vote of optimisticVotes) {
-      const list = map[vote.suggestion_id]
-      if (!list) continue
-
-      const item = list.find((entry) => entry.participantId === vote.participant_id)
-      if (item) {
-        item.points = vote.points
-      }
-    }
-
-    return map
-  }, [suggestions, optimisticVotes, participantsWithColors])
-
-  const displaySuggestions = useMemo(() => {
-    return [...suggestions].sort((a, b) =>
-      a.created_at.localeCompare(b.created_at)
-    )
-  }, [suggestions])
-
-  const sortedSuggestions = useMemo(() => {
-    return [...suggestions].sort((a, b) => {
-      const diff = (totalsBySuggestion[b.id] ?? 0) - (totalsBySuggestion[a.id] ?? 0)
-      if (diff !== 0) return diff
-      return a.created_at.localeCompare(b.created_at)
-    })
-  }, [suggestions, totalsBySuggestion])
-
-  const topThree = useMemo(() => {
-    return sortedSuggestions.slice(0, 3)
-  }, [sortedSuggestions])
-
-  const topMax = useMemo(() => {
-    if (topThree.length === 0) return 1
-    return Math.max(...topThree.map((item) => totalsBySuggestion[item.id] ?? 0), 1)
-  }, [topThree, totalsBySuggestion])
-
-  if (loading && !removedModalOpen) {
-    return (
-      <div className="app-shell">
-        <div className="card room-card">
-          <h2>Loading room...</h2>
-          <p className="subtext">Setting up your seat at the table.</p>
-        </div>
-      </div>
-    )
-  }
-
-  if (error === 'Room not found.') {
-    return (
-      <div className="app-shell">
-        <div className="card room-card">
-          <div className="room-topbar">
-            <Link to="/" className="back-link">
-              Back
-            </Link>
-            <div className="room-id-wrap">
-              <span className="room-id-label">ROOM ID</span>
-              <span className="room-pill">
-                <strong>{upperCode}</strong>
-              </span>
-              <button className="copy-link-btn" onClick={handleCopyLink} type="button">
-                <span role="img" aria-hidden="true">🔗</span>
-                Copy link
-              </button>
-            </div>
-          </div>
-          <h2>Couldn't open room</h2>
-          <p className="error-text">{error}</p>
-        </div>
-      </div>
-    )
-  }
-
-  const leader = topThree[0]
+  if (loading) return <Layout><div className="app-shell"><div className="card room-card"><h2>Loading room...</h2></div></div></Layout>
+  if (error === 'Room not found.') return <Layout><div className="app-shell"><div className="card room-card"><Link to="/">Back</Link><h2>Couldn’t open room</h2><p className="error-text">{error}</p></div></div></Layout>
 
   return (
-    <div className="app-shell">
-      <div className="card room-card">
-        <div className="room-topbar">
-          <Link to="/" className="back-link">
-            Back
-          </Link>
-          <div className="room-id-wrap">
-            <span className="room-id-label">ROOM ID</span>
-            <span className="room-pill">
-              <strong>{upperCode}</strong>
-            </span>
-            <button className="copy-link-btn" onClick={handleCopyLink} type="button">
-              <span role="img" aria-hidden="true">🔗</span>
-              Copy link
-            </button>
-            {copyMessage ? <span className="copy-message">{copyMessage}</span> : null}
-          </div>
-        </div>
+    <Layout><div className="app-shell"><div className="card room-card">
+      <div className="room-topbar"><Link to="/" className="back-link">Back</Link><div className="room-id-wrap"><span className="room-id-label">ROOM ID</span><span className="room-pill"><strong>{upper}</strong></span><button className="copy-link-btn" type="button" onClick={copyLink}>🔗 {copyMessage || 'Copy link'}</button></div></div>
 
-        <div className="room-stack">
-          <section className="panel winner-banner">
-            <div className="winner-copy">
-              <p className="eyebrow">Current leader</p>
-              <h2 title={leader?.name ?? ''}>
-                {leader ? truncateLabel(leader.name, 50) : 'Waiting for suggestions'}
-              </h2>
-              <p className="subtext small">
-                {leader
-                  ? `${totalsBySuggestion[leader.id] ?? 0} total points so far.`
-                  : 'Add a place to get started.'}
-              </p>
-            </div>
-            <div className="sync-badge">{savingVotes ? 'Saving...' : 'Live'}</div>
-          </section>
-
-          <div className="you-points-grid">
-            <section className="panel you-panel">
-              <p className="eyebrow">You</p>
-              <h2 title={displayName || 'Hungry Friend'}>
-                {truncateLabel(displayName || 'Hungry Friend', 32)}
-              </h2>
-
-              <form onSubmit={handleSaveName} className="stack-form you-rename-form">
-                <label className="field-label" htmlFor="display-name">
-                  Rename yourself
-                </label>
-                <div className="join-row">
-                  <input
-                    id="display-name"
-                    className="input"
-                    value={nameInput}
-                    onChange={(e) => setNameInput(e.target.value)}
-                    placeholder="Enter your display name"
-                    maxLength={60}
-                  />
-                  <button
-                    className="btn btn-secondary"
-                    type="submit"
-                    disabled={savingName}
-                  >
-                    {savingName ? 'Saving...' : 'Save'}
-                  </button>
-                </div>
-              </form>
-            </section>
-
-            <section className="panel you-points-panel">
-              <p className="eyebrow">Points left</p>
-              <div className="you-points-value">{myRemainingPoints}</div>
-              <p className="subtext small">out of 100</p>
-
-              <div className="meter-wrap compact">
-                <div className="meter-labels">
-                  <span>Used {myUsedPoints}</span>
-                  <span>Remaining {myRemainingPoints}</span>
-                </div>
-                <div className="meter">
-                  <div
-                    className="meter-fill"
-                    style={{ width: `${Math.min(myUsedPoints, 100)}%` }}
-                  />
-                </div>
+      <div className="room-stack">
+        <section className="panel panel-wide">
+          <p className="eyebrow">Live rankings</p>
+          <div className="rank-chart">
+            {top.length ? top.map((item, index) => {
+              const total = totals[item.id] || 0
+              return <div className="rank-row" key={item.id}>
+                <div className="rank-head"><span className="rank-index">{index + 1}</span><span className="rank-name">{shorten(item.name)}</span><span className="rank-total">{total}</span></div>
+                <div className="rank-track"><div className="rank-stack" style={{ width: `${(total / maxTotal) * 100}%` }}>
+                  {optimistic.filter((vote) => vote.suggestion_id === item.id && vote.points > 0).map((vote, segmentIndex) => {
+                    const color = colored.find((person) => person.id === vote.participant_id)?.color || COLORS[0]
+                    return <div className="rank-segment" key={`${vote.participant_id}-${segmentIndex}`} style={{ width: `${(vote.points / total) * 100}%`, background: color.solid }} />
+                  })}
+                </div></div>
               </div>
-            </section>
+            }) : <div className="empty-state">No ranking yet. Add suggestions to see the leaderboard.</div>}
           </div>
 
-          <section className="panel compact-panel">
-            <p className="field-label">People in room</p>
-            <div className="people-list people-list-wide">
-              {participantsWithColors.map((person) => (
-                <div
-                  key={person.id}
-                  className="person-chip"
-                  style={{
-                    background: person.color.soft,
-                    border: `1px solid ${person.color.solid}33`,
-                    color: person.color.solid,
-                  }}
-                  title={person.display_name}
-                >
-                  <span
-                    className="person-dot"
-                    style={{ background: person.color.solid }}
-                  />
-                  <span className="person-chip-text">
-                    {truncateLabel(person.display_name, 22)}
-                  </span>
-                  <button
-                    type="button"
-                    className="person-remove"
-                    aria-label={`Remove ${person.display_name}`}
-                    onClick={() => handleRemoveParticipant(person)}
-                    disabled={person.id === participantId || removedModalOpen}
-                  >
-                    <span role="img" aria-hidden="true">✕</span>
-                  </button>
-                </div>
+          <div className="points-left-block">
+            <p className="eyebrow">Points left</p>
+            <div className="points-left-list">
+              {pointsLeft.map((person) => (
+                <button type="button" className="points-left-row" key={person.id} disabled={person.id === me?.id || removed || kicking} onClick={() => person.id !== me?.id && setKickTarget(person)} style={{ '--user-color': person.color.solid, '--user-soft': person.color.soft, '--left-pct': `${person.left}%` }}>
+                  <span className="points-left-user"><span className="person-dot" style={{ background: person.color.solid }} /><span className="points-left-name">{shorten(person.display_name, 28)}{person.id === me?.id ? ' (you)' : ''}</span></span>
+                  <span className="points-left-value">{person.left}</span>
+                </button>
               ))}
             </div>
-          </section>
+          </div>
+        </section>
 
-          <section className="panel compact-panel">
-            <div className="section-head">
-              <p className="field-label">Live chat</p>
-            </div>
+        <section className="panel compact-panel">
+          <p className="eyebrow">Live chat</p>
+          <div className="chat-log" ref={chatRef}>{messages.length ? messages.map((item) => <div className={`chat-item chat-${item.type}`} key={item.id}>{renderMessage(item)}</div>) : <div className="chat-empty">No updates yet.</div>}</div>
+          <form className="chat-form" onSubmit={sendChat}><input className="input" value={chat} onChange={(event) => setChat(event.target.value)} placeholder="Send a message" maxLength={240} /><button className="btn btn-primary" type="submit">Send</button></form>
+        </section>
 
-            <div className="chat-log" ref={chatLogRef} onScroll={handleChatScroll}>
-              {messages.length === 0 ? (
-                <div className="chat-empty">No updates yet.</div>
-              ) : (
-                messages.map((message) => (
-                  <div key={message.id} className={`chat-item chat-${message.type}`}>
-                    {renderMessageContent(message)}
-                  </div>
-                ))
-              )}
-              <div ref={chatBottomRef} />
-            </div>
-
-            <form className="chat-form" onSubmit={handleSendChat}>
-              <input
-                className="input"
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
-                placeholder="Send a message"
-                maxLength={240}
-                disabled={removedModalOpen}
-              />
-              <button
-                className="btn btn-primary"
-                type="submit"
-                disabled={!chatInput.trim() || removedModalOpen}
-              >
-                Send
-              </button>
-            </form>
-          </section>
-
-          <section className="panel panel-wide">
-            <div className="results-top">
-              <div>
-                <p className="eyebrow">Live ranking</p>
-                <h3>Top 3 right now</h3>
+        <section className="panel panel-wide voting-panel">
+          <p className="eyebrow voting-title">Voting</p>
+          <form className="stack-form add-form" onSubmit={addSuggestion}><div className="join-row"><input className="input" value={suggestion} onChange={(event) => setSuggestion(event.target.value.slice(0, 100))} maxLength={100} placeholder="Add a suggestion (e.g. Eat at Shake Shack)" /><button className="btn btn-primary" type="submit">Add</button></div></form>
+          {error ? <p className="error-text">{error}</p> : null}
+          <div className="suggestion-list">
+            {suggestions.map((item) => {
+              const mine = draft[item.id] || 0
+              const total = totals[item.id] || 0
+              const maxAllowed = Math.max(0, 100 - used + mine)
+              return <div className="suggestion-card" key={item.id}>
+                <div className="suggestion-main"><div className="suggestion-copy"><h3>{shorten(item.name)}</h3><p className="suggestion-meta">Total {total} points · Yours {mine}</p></div><div className="suggestion-actions"><div className="pill-total">{total}</div><button type="button" className="btn btn-delete" onClick={() => deleteSuggestion(item)}>Delete</button></div></div>
+                <div className="slider-block"><div className="slider-labels"><span>0</span><span>Your points {mine}</span><span>100</span></div><input type="range" className="vote-slider" min="0" max="100" value={mine} onChange={(event) => changeVote(item.id, event.target.value)} style={{ '--slider-color': meColor.solid, '--slider-soft': meColor.soft, background: `linear-gradient(to right, ${meColor.soft} 0, ${meColor.solid} ${mine}%, var(--surface-2) ${mine}%, var(--surface-2) 100%)` }} /><p className="suggestion-meta">Max you can set now: {maxAllowed}</p></div>
               </div>
-            </div>
-
-            <div className="rank-chart">
-              {topThree.length === 0 ? (
-                <div className="empty-state">
-                  <p>No ranking yet. Add suggestions to see the leaderboard.</p>
-                </div>
-              ) : (
-                topThree.map((item, index) => {
-                  const total = totalsBySuggestion[item.id] ?? 0
-                  const width = (total / topMax) * 100
-                  const segments = voteBreakdownBySuggestion[item.id] ?? []
-
-                  return (
-                    <div key={item.id} className="rank-row">
-                      <div className="rank-head">
-                        <span className="rank-index">{index + 1}</span>
-                        <span className="rank-name" title={item.name}>
-                          {truncateLabel(item.name, 50)}
-                        </span>
-                        <span className="rank-total">{total}</span>
-                      </div>
-
-                      <div className="rank-track">
-                        <div className="rank-stack" style={{ width: `${width}%` }}>
-                          {segments.map((segment) => {
-                            const percent = total > 0 ? (segment.points / total) * 100 : 0
-                            if (percent <= 0) return null
-
-                            return (
-                              <div
-                                key={segment.participantId}
-                                className="rank-segment"
-                                style={{
-                                  width: `${percent}%`,
-                                  background: segment.color.solid,
-                                }}
-                                title={`${segment.displayName}: ${segment.points}`}
-                              />
-                            )
-                          })}
-                        </div>
-                      </div>
-                    </div>
-                  )
-                })
-              )}
-            </div>
-          </section>
-
-          <section className="panel panel-wide">
-            <form onSubmit={handleAddSuggestion} className="stack-form add-form">
-              <label className="field-label" htmlFor="suggestion-name">
-                Add a place
-              </label>
-              <div className="join-row">
-                <input
-                  id="suggestion-name"
-                  className="input"
-                  value={suggestionInput}
-                  onChange={(e) => setSuggestionInput(e.target.value.slice(0, 100))}
-                  placeholder="e.g. Shake Shack, Sushiro, Din Tai Fung"
-                  maxLength={100}
-                  disabled={removedModalOpen}
-                />
-                <button
-                  className="btn btn-primary"
-                  type="submit"
-                  disabled={addingSuggestion || removedModalOpen}
-                >
-                  {addingSuggestion ? 'Adding...' : 'Add'}
-                </button>
-              </div>
-              <p className="suggestion-meta">
-                {suggestionInput.length}/100 characters
-              </p>
-            </form>
-
-            {error && error !== 'Room not found.' ? (
-              <p className="error-text">{error}</p>
-            ) : null}
-
-            <div className="suggestion-list">
-              {displaySuggestions.length === 0 ? (
-                <div className="empty-state">
-                  <p>No places yet. Add the first suggestion.</p>
-                </div>
-              ) : (
-                displaySuggestions.map((item) => {
-                  const myPoints = draftVotes[item.id] ?? 0
-                  const totalPoints = totalsBySuggestion[item.id] ?? 0
-                  const usedWithoutCurrent = myUsedPoints - myPoints
-                  const maxAllowed = Math.max(0, 100 - usedWithoutCurrent)
-                  const sliderPercent = myPoints
-                  const segments = voteBreakdownBySuggestion[item.id] ?? []
-
-                  return (
-                    <div key={item.id} className="suggestion-card">
-                      <div className="suggestion-main">
-                        <div className="suggestion-copy">
-                          <h3 title={item.name}>{truncateLabel(item.name, 50)}</h3>
-                          <p className="suggestion-meta">
-                            Total {totalPoints} points · Yours {myPoints}
-                          </p>
-                        </div>
-
-                        <div className="suggestion-actions">
-                          <div className="pill-total">{totalPoints}</div>
-                          <button
-                            type="button"
-                            className="btn btn-delete"
-                            onClick={() => handleDeleteSuggestion(item.id)}
-                            disabled={deletingSuggestionId === item.id || removedModalOpen}
-                          >
-                            {deletingSuggestionId === item.id ? 'Deleting...' : 'Delete'}
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="stacked-total-bar">
-                        {segments.map((segment) => {
-                          const percent = totalPoints > 0 ? (segment.points / totalPoints) * 100 : 0
-                          if (percent <= 0) return null
-
-                          return (
-                            <div
-                              key={segment.participantId}
-                              className="stacked-total-segment"
-                              style={{
-                                width: `${percent}%`,
-                                background: segment.color.solid,
-                              }}
-                              title={`${segment.displayName}: ${segment.points}`}
-                            />
-                          )
-                        })}
-                      </div>
-
-                      <div className="slider-block">
-                        <div className="slider-labels">
-                          <span>0</span>
-                          <span>Your points {myPoints}</span>
-                          <span>100</span>
-                        </div>
-
-                        <input
-                          type="range"
-                          min="0"
-                          max="100"
-                          step="1"
-                          value={myPoints}
-                          onChange={(e) => handleSliderChange(item.id, e.target.value)}
-                          className="vote-slider"
-                          disabled={removedModalOpen}
-                          style={{
-                            background: `linear-gradient(to right, #0f6c70 0%, #0f6c70 ${sliderPercent}%, #e8dfd5 ${sliderPercent}%, #e8dfd5 100%)`,
-                          }}
-                        />
-
-                        <p className="suggestion-meta">
-                          Max you can set now: {maxAllowed}
-                        </p>
-                      </div>
-                    </div>
-                  )
-                })
-              )}
-            </div>
-          </section>
-        </div>
+            })}
+          </div>
+        </section>
       </div>
 
-      {removedModalOpen ? (
-        <div className="modal-backdrop">
-          <div className="modal-card">
-            <p className="eyebrow">Session ended</p>
-            <h3>You have been removed</h3>
-            <p className="subtext small">{removedModalMessage}</p>
-            <p className="modal-note">You can return now, or wait a few seconds for automatic redirect.</p>
-            <div className="modal-actions">
-              <button className="btn btn-primary" type="button" onClick={handleReturnHome}>
-                Return to home page
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-    </div>
+      {removed ? <div className="modal-backdrop"><div className="modal-card"><p className="eyebrow">Session ended</p><h3>You have been removed from this session</h3><p className="subtext small">You will be redirected to the main page in 5 seconds.</p><div className="modal-actions"><button className="btn btn-primary" type="button" onClick={() => navigate('/')}>Return now</button></div></div></div> : null}
+      {kickTarget ? <div className="modal-backdrop"><div className="modal-card kick-modal"><p className="eyebrow">Remove participant</p><h3>Kick user?</h3><p className="subtext small">Are you sure you want to kick <strong>{kickTarget.display_name}</strong> from this session?</p><div className="modal-actions"><button className="btn btn-secondary" type="button" onClick={() => setKickTarget(null)}>Cancel</button><button className="btn btn-delete" type="button" onClick={confirmKick} disabled={kicking}>{kicking ? 'Kicking...' : 'Kick user'}</button></div></div></div> : null}
+    </div></div></Layout>
   )
 }
 
 export default function App() {
-  return (
-    <Routes>
-      <Route path="/" element={<HomePage />} />
-      <Route path="/room/:code" element={<RoomPage />} />
-    </Routes>
-  )
+  return <Routes><Route path="/" element={<HomePage />} /><Route path="/room/:code/name" element={<NamePage />} /><Route path="/room/:code" element={<RoomPage />} /></Routes>
 }
